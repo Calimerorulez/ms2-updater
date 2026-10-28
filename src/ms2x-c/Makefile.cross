@@ -1,0 +1,43 @@
+# Omega2+ cross-build with verified offline tool and deployable SocketCAN CLI. Requires a complete mipsel OpenWrt/musl toolchain.
+# This file never invokes a target executable, installs packages or downloads.
+.DEFAULT_GOAL := all
+PYTHON ?= python3
+CROSS_COMPILE ?= mipsel-openwrt-linux-
+CROSS_LINK ?= static
+CROSS_BUILD ?= cross-build/omega2-$(CROSS_LINK)
+CROSS_CC = $(CROSS_COMPILE)gcc
+CROSS_AR = $(CROSS_COMPILE)ar
+CROSS_STRIP = $(CROSS_COMPILE)strip
+CROSS_ARCH_FLAGS = -EL -mabi=32 -mips32r2 -mtune=24kc -msoft-float -mno-mips16 -mno-micromips
+CROSS_CFLAGS ?= -Os -g -ffunction-sections -fdata-sections -fno-common -fstack-usage
+CROSS_WARN = -std=c11 -Wall -Wextra -Werror -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wstrict-prototypes -Wmissing-prototypes -Wformat=2 -Wundef -Wwrite-strings
+CROSS_LDFLAGS ?= -Wl,--gc-sections -Wl,--build-id=none -Wl,-z,noexecstack
+
+ifeq ($(CROSS_LINK),static)
+LINK_FLAG = -static
+else ifeq ($(CROSS_LINK),dynamic)
+LINK_FLAG = -static-libgcc
+else
+$(error CROSS_LINK must be static or dynamic)
+endif
+
+.PHONY: all preflight
+all: preflight
+	$(CROSS_CC) -Iinclude $(CROSS_ARCH_FLAGS) $(CROSS_CFLAGS) $(CROSS_WARN) -c cross/abi_probe.c -o "$(CROSS_BUILD)/abi-probe.o"
+	$(MAKE) -f Makefile -B BUILD="$(CROSS_BUILD)" CC="$(CROSS_CC)" AR="$(CROSS_AR)" CFLAGS="$(CROSS_ARCH_FLAGS) $(CROSS_CFLAGS)" LDFLAGS="$(LINK_FLAG) $(CROSS_LDFLAGS) -Wl,-Map,$(abspath $(CROSS_BUILD))/ms2x-offline.map" "$(CROSS_BUILD)/ms2x-offline"
+	$(CROSS_STRIP) --strip-all -o "$(CROSS_BUILD)/ms2x-offline.stripped" "$(CROSS_BUILD)/ms2x-offline"
+	$(PYTHON) -B cross/verify_elf.py --prefix "$(CROSS_COMPILE)" --link "$(CROSS_LINK)" --build "$(CROSS_BUILD)"
+	$(MAKE) -f Makefile -B BUILD="$(CROSS_BUILD)/release" CC="$(CROSS_CC)" AR="$(CROSS_AR)" CFLAGS="$(CROSS_ARCH_FLAGS) $(CROSS_CFLAGS)" LDFLAGS="$(LINK_FLAG) $(CROSS_LDFLAGS)" "$(CROSS_BUILD)/release/ms2-updater"
+	$(CROSS_STRIP) --strip-all -o "$(CROSS_BUILD)/release/ms2-updater.stripped" "$(CROSS_BUILD)/release/ms2-updater"
+	@file "$(CROSS_BUILD)/release/ms2-updater.stripped"
+	@sha256sum "$(CROSS_BUILD)/release/ms2-updater.stripped"
+
+preflight:
+	@command -v "$(CROSS_CC)" >/dev/null || { echo 'Missing mipsel OpenWrt/musl SDK; set CROSS_COMPILE to its absolute bin/prefix.' >&2; exit 1; }
+	@machine=$$("$(CROSS_CC)" -dumpmachine); case "$$machine" in mipsel-openwrt-linux-musl*) ;; *) echo "Unsuitable compiler target: $$machine (need mipsel-openwrt-linux-musl)." >&2; exit 1;; esac
+	@mkdir -p "$(CROSS_BUILD)"
+	@rm -f "$(CROSS_BUILD)/verification.json"
+	$(CROSS_CC) --version > "$(CROSS_BUILD)/compiler-version.txt"
+	$(CROSS_CC) -dumpmachine > "$(CROSS_BUILD)/compiler-target.txt"
+	$(CROSS_CC) -print-sysroot > "$(CROSS_BUILD)/compiler-sysroot.txt"
+	$(CROSS_CC) $(CROSS_ARCH_FLAGS) -dM -E -x c /dev/null > "$(CROSS_BUILD)/compiler-macros.txt"
