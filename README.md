@@ -1,32 +1,51 @@
 # MS2 Updater
 
-Independent, community-maintained tooling for Märklin Mobile Station 2 (MS2) firmware updates over a compatible CAN interface, without requiring a CS2 or CS3.
+Community-maintained, independent Märklin Mobile Station 2 (MS2) updater for Linux SocketCAN.
 
-> **Project status: preparing the public source release.** This repository does **not yet contain the verified updater source or a downloadable release**. Do not attempt firmware flashing from this repository until the code, safety checks, and build instructions have been reviewed and published.
+**Status: source preview — no v1.0.0 release yet.** The source has been privacy-sanitized and the native CLI build was verified. Full public test/release verification and target-device testing of the sanitized revision remain outstanding. Use firmware flashing at your own risk.
 
-## Design requirements
+## Build
 
-- **No fixed device IDs:** Discover the target MS2 dynamically at runtime. A UID from an author's test setup must never be embedded in the program.
-- **No hard-coded hardware revision:** Detect the reported hardware identity and select the *matching* firmware image and protocol path. Never treat an unknown device type as an assumed compatible one.
-- **No accidental flashing:** Require an explicit update operation; probing must be read-only. Verify the detected UID, hardware type, firmware image, image integrity and update eligibility before changing device state.
-- **Safe CAN traffic:** Ignore unrelated devices, check acknowledgements and abort safely on timeouts, errors or ambiguous responses.
-- **No bundled proprietary images:** Users must obtain firmware/resource files lawfully; Märklin is a trademark of its respective owner.
-- **No personal or infrastructure-specific configuration:** Never publish private IP addresses, usernames, hostnames, real device identifiers, dumps or logs without redaction.
+```sh
+cd src/ms2x-c
+make build/ms2-updater
+./build/ms2-updater --help
+```
 
-## Compatibility
+Requires a C11 compiler, `make`, Linux and SocketCAN headers. For an OpenWrt Omega2+ cross-build, use `make -f Makefile.cross all CROSS_COMPILE=<your-toolchain-prefix>`. The included `Makefile.cross` currently builds an *offline test binary*, not a packaged release CLI; the actual release packaging must still be completed.
 
-The project aims to support supported MS2 device families by *runtime identification* and validated firmware mapping, not by fixed serial numbers or assumptions about revisions. Exact supported combinations will be documented and tested with the code release. An unfamiliar revision must be rejected safely rather than flashed speculatively.
+The full historical test harness depends on externally supplied official firmware and some non-public, redacted CAN captures. Those are deliberately excluded. Do not treat `make check` as a completely self-contained test at this stage.
 
-## Scope
+## Usage
 
-The MS2 updater is the primary project. Experimental recovery utilities and third-party firmware images are **not** part of the first public release.
+Read-only passive observation:
 
-## Licensing
+```sh
+./build/ms2-updater probe --interface can0 --seconds 10
+```
 
-Project-original contributions are intended to be MIT licensed (see [LICENSE](LICENSE)). Code derived from third parties retains its original terms; review [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) before importing any such source.
+Active identification:
 
-## Safety
+```sh
+./build/ms2-updater probe --interface can0 --seconds 10 --query
+```
 
-Firmware updates can render equipment unusable. Do not flash without a backup/recovery plan, a stable power supply, the exact matching image and a verified device identity. No warranty is provided.
+The `update` and `serve-resources` commands can modify target state. They are enabled in this **source snapshot** and must not be used until the device/image selection and deployment are independently verified. No binary or firmware image is distributed here.
 
-This project is not affiliated with or endorsed by Märklin.
+## Device-independent targeting
+
+The production CLI does **not** depend on an author's device UID: it discovers MS2 identities at runtime. If more than one compatible MS2 is present, use `--target UID` to select the intended device. Profile definitions cover MS2 hardware IDs `0032`, `0033`, and `0034`; firmware images must exactly match the detected hardware profile. Unsupported revisions are rejected instead of guessed. Supporting these IDs in the source does not claim successful hardware testing on each revision.
+
+Historical *offline test fixtures* use synthetic IDs and are not target selection.
+
+## Firmware
+
+Firmware, locomotive database and language/resource images must be obtained separately from authorized sources. They are not redistributed in this repository.
+
+## Privacy and attribution
+
+No personal LAN addresses, original test-device UIDs, private captures, firmware images, generated artifacts, or local build toolchains are intentionally included. Source files derived from third parties retain their existing attribution; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [src/ms2x-c/LICENSE.gerd](src/ms2x-c/LICENSE.gerd).
+
+Licensed under MIT for project-original work; third-party terms remain applicable.
+
+Independent project, not affiliated with or endorsed by Märklin.
