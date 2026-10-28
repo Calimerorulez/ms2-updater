@@ -1,0 +1,48 @@
+# Local build products
+build/
+out/
+dist/
+*.o
+*.a
+*.so
+*.elf
+*.stripped
+*.bin
+*.img
+*.hex
+*.uf2
+*.fw
+*.ms2
+
+# Firmware/resource dumps and private evidence
+firmware/
+firmwares/
+resources/
+private/
+secrets/
+captures/
+evidence/
+reports/evidence/
+*.pcap
+*.pcapng
+*.candump
+*.log
+*.dump
+*.bak
+
+# Credentials/configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+*.token
+*.secret
+
+# Editor/OS
+.DS_Store
+.idea/
+.vscode/
+__pycache__/
