@@ -77,3 +77,10 @@ $(BUILD)/test-profiles: tests/test_profiles.c $(BUILD)/libms2x.a include/ms2x.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARN) $< $(BUILD)/libms2x.a $(LDFLAGS) -o $@
 check-profiles: $(BUILD)/test-profiles
 	$(BUILD)/test-profiles
+
+# Offline rejection tests: synthetic buffers only, no real firmware or CAN.
+.PHONY: check-firmware-reject
+$(BUILD)/test-firmware-reject: tests/test_firmware_reject.c $(BUILD)/libms2x.a include/ms2x.h
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARN) $< $(BUILD)/libms2x.a $(LDFLAGS) -o $@
+check-firmware-reject: $(BUILD)/test-firmware-reject
+	$(BUILD)/test-firmware-reject
