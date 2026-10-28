@@ -1,4 +1,4 @@
-# Offline Omega2+ build. Requires a complete mipsel OpenWrt/musl toolchain.
+# Omega2+ cross-build with verified offline tool and deployable SocketCAN CLI. Requires a complete mipsel OpenWrt/musl toolchain.
 # This file never invokes a target executable, installs packages or downloads.
 .DEFAULT_GOAL := all
 PYTHON ?= python3
@@ -27,6 +27,10 @@ all: preflight
 	$(MAKE) -f Makefile -B BUILD="$(CROSS_BUILD)" CC="$(CROSS_CC)" AR="$(CROSS_AR)" CFLAGS="$(CROSS_ARCH_FLAGS) $(CROSS_CFLAGS)" LDFLAGS="$(LINK_FLAG) $(CROSS_LDFLAGS) -Wl,-Map,$(abspath $(CROSS_BUILD))/ms2x-offline.map" "$(CROSS_BUILD)/ms2x-offline"
 	$(CROSS_STRIP) --strip-all -o "$(CROSS_BUILD)/ms2x-offline.stripped" "$(CROSS_BUILD)/ms2x-offline"
 	$(PYTHON) -B cross/verify_elf.py --prefix "$(CROSS_COMPILE)" --link "$(CROSS_LINK)" --build "$(CROSS_BUILD)"
+	$(MAKE) -f Makefile -B BUILD="$(CROSS_BUILD)/release" CC="$(CROSS_CC)" AR="$(CROSS_AR)" CFLAGS="$(CROSS_ARCH_FLAGS) $(CROSS_CFLAGS)" LDFLAGS="$(LINK_FLAG) $(CROSS_LDFLAGS)" "$(CROSS_BUILD)/release/ms2-updater"
+	$(CROSS_STRIP) --strip-all -o "$(CROSS_BUILD)/release/ms2-updater.stripped" "$(CROSS_BUILD)/release/ms2-updater"
+	@file "$(CROSS_BUILD)/release/ms2-updater.stripped"
+	@sha256sum "$(CROSS_BUILD)/release/ms2-updater.stripped"
 
 preflight:
 	@command -v "$(CROSS_CC)" >/dev/null || { echo 'Missing mipsel OpenWrt/musl SDK; set CROSS_COMPILE to its absolute bin/prefix.' >&2; exit 1; }
