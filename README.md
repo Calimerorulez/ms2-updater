@@ -12,7 +12,7 @@ make build/ms2-updater
 ./build/ms2-updater --help
 ```
 
-Requires a C11 compiler, `make`, Linux and SocketCAN headers. For an OpenWrt Omega2+ cross-build, use `make -f Makefile.cross all CROSS_COMPILE=<your-toolchain-prefix>`. The included `Makefile.cross` currently builds an *offline test binary*, not a packaged release CLI; the actual release packaging must still be completed.
+Requires a C11 compiler, `make`, Linux and SocketCAN headers. For an OpenWrt Omega2+ cross-build, use `make -f Makefile.cross all CROSS_COMPILE=<your-toolchain-prefix>`. The included `Makefile.cross` builds and verifies the offline tool and also cross-compiles the real statically linked SocketCAN CLI to `cross-build/omega2-static/release/ms2-updater.stripped`. The target CLI still requires on-device read-only probe verification before a tagged release.
 
 The full historical test harness depends on externally supplied official firmware and some non-public, redacted CAN captures. Those are deliberately excluded. Do not treat `make check` as a completely self-contained test at this stage.
 
