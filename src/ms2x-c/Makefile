@@ -71,3 +71,9 @@ clean:
 # Separate output tree, compiler variables and no target-program execution.
 cross:
 	$(MAKE) -f Makefile.cross all
+# Self-contained profile safety smoke test: no firmware images or CAN bus needed.
+.PHONY: check-profiles
+$(BUILD)/test-profiles: tests/test_profiles.c $(BUILD)/libms2x.a include/ms2x.h
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARN) $< $(BUILD)/libms2x.a $(LDFLAGS) -o $@
+check-profiles: $(BUILD)/test-profiles
+	$(BUILD)/test-profiles
