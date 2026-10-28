@@ -107,9 +107,9 @@ static void real_identities(void)
 {
     static const uint32_t ids[]={0x0031b311U,0x0031f758U,0x0031b33eU,0x0031d37eU,0x00319911U};
     static const uint8_t data[][8]={
-        {0x43U,0x42U,0x55U,0x53U,1U,17U,0U,0x40U},
-        {0x47U,0x45U,0x9fU,0xb0U,1U,47U,0U,0x11U},
-        {0x2cU,0x28U,0xfaU,0x16U,4U,3U,0xffU,0xf0U},
+        {0x43U,0x42U,0x2bU,0x53U,1U,17U,0U,0x40U},
+        {0x66U,0x77U,0x88U,0x99U,1U,47U,0U,0x11U},
+        {0x3cU,0x28U,0xfaU,0x16U,4U,3U,0xffU,0xf0U},
         {0U,0U,0x18U,1U,2U,1U,0x46U,0xffU},
         {0x12U,0x34U,0xabU,0xcdU,3U,112U,0U,0x33U}
     };
@@ -223,7 +223,7 @@ static void boot_probe(void)
         ms2x_session_config config={0,1,scenario==6U ? 0 : 1,0x1a2b3c4dU,NULL,1000U,NULL,0,0U};
         ms2x_session_result result;
         ms2x_identity id;
-        const uint8_t identity[]={0x4dU,0x55U,0x2cU,0x58U,1U,2U,0U,0x33U};
+        const uint8_t identity[]={0x1aU,0x2bU,0x3cU,0x4dU,1U,2U,0U,0x33U};
         receive_queue[0].can_id=CAN_EFF_FLAG|0x00370b0dU; receive_queue[0].can_dlc=8U;
         memcpy(receive_queue[0].data,identity,8U);
         if (scenario==2U) { receive_queue[0].can_id=CAN_EFF_FLAG|0x00310b0dU; receive_queue[0].data[4]=3U; receive_queue[0].data[5]=112U; }
@@ -251,7 +251,7 @@ static void boot_probe(void)
     }
     {
         const char *active[]={"ms2-updater","probe","--bootloader","--query","--interface","can0","--seconds","1","--target","1A2B3C4D"};
-        const uint8_t identity[]={0x4dU,0x55U,0x2cU,0x58U,1U,2U,0U,0x33U};
+        const uint8_t identity[]={0x1aU,0x2bU,0x3cU,0x4dU,1U,2U,0U,0x33U};
         receive_queue[0].can_id=CAN_EFF_FLAG|0x00370b0dU; receive_queue[0].can_dlc=8U;
         memcpy(receive_queue[0].data,identity,8U);
         for (unsigned reply=0U;reply<2U;++reply) {
@@ -338,7 +338,7 @@ int main(int argc, char **argv)
         serve_ping=transmitted;
         /* Exact first-trial target and window; syscalls remain wrapped. */
         receive_queue[0].can_id=CAN_EFF_FLAG|0x00310b0dU; receive_queue[0].can_dlc=8U;
-        { const uint8_t id[]={0x4dU,0x55U,0x2cU,0x58U,3U,112U,0U,0x33U}; memcpy(receive_queue[0].data,id,8U); }
+        { const uint8_t id[]={0x1aU,0x2bU,0x3cU,0x4dU,3U,112U,0U,0x33U}; memcpy(receive_queue[0].data,id,8U); }
         before=writes; reply_after_write=before+1U;
         queue_count=1U; queue_pos=0U; now=0U;
         CHECK(cli(8,serve_target)==0 && writes==before+2U && now==30000U);
