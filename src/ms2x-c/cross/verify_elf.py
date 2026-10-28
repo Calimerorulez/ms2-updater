@@ -130,7 +130,7 @@ def main():
         'no_forbidden_symbols': not symbols.intersection(FORBIDDEN),
         'non_executable_stack': any('GNU_STACK' in line and 'RWE' not in line
                                     for line in segments.splitlines()),
-        'abi_measurement': layout[0] == layout[1] == 4 and layout[8] == 159744,
+        'abi_measurement': layout[0] == layout[1] == 4 and layout[8] == 159744 + layout[0],
     }
     if args.link == 'static':
         symbol_audit = static_symbol_audit(data)
