@@ -43,7 +43,7 @@ static ms2x_frame ping(void)
 {
     ms2x_frame f={0};
     f.id=0x0031beefU; f.dlc=8U; f.extended=1U;
-    f.data[0]=0x4dU; f.data[1]=0x55U; f.data[2]=0x2cU; f.data[3]=0x58U;
+    f.data[0]=0x1aU; f.data[1]=0x2bU; f.data[2]=0x3cU; f.data[3]=0x4dU;
     f.data[4]=3U; f.data[5]=112U; f.data[7]=0x33U; return f;
 }
 static unsigned nibble(char c)
@@ -295,7 +295,7 @@ static void integrated(const char *tail, const char *image_path)
             for (size_t i=2U;i<events;++i) trace[i].at-=500U;
             config.bootloader=1;
             if (scenario==2U) trace[1].frame.data[7]=0x34U;
-            if (scenario==3U) trace[1].frame.data[0]=0x55U;
+            if (scenario==3U) trace[1].frame.data[0]=0x2bU;
         }
         end=trace[events-1U].at; app_index=events;
         file=fopen(tail,"r"); CHECK(file!=NULL);
@@ -341,7 +341,7 @@ static void integrated(const char *tail, const char *image_path)
                 ms2x_frame *f=&trace[i].frame;
                 uint32_t cmd=f->id&0xffff0000U;
                 if ((cmd==0x00310000U || cmd==0x00370000U || f->id==0x00364711U || f->id==MS2X_HASH) &&
-                    f->dlc>=4U && f->data[0]==0x4dU && f->data[1]==0x55U && f->data[2]==0x2cU && f->data[3]==0x58U) {
+                    f->dlc>=4U && f->data[0]==0x1aU && f->data[1]==0x2bU && f->data[2]==0x3cU && f->data[3]==0x4dU) {
                     f->data[0]=0x12U; f->data[1]=0x34U; f->data[2]=0xabU; f->data[3]=0xcdU;
                 }
             }
