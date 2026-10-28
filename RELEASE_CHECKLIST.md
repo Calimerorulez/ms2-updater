@@ -41,3 +41,13 @@ Do not claim hardware revisions 0032 and 0034 are tested on real devices: only t
 - **Important:** the firmware-free profile test covers *metadata mapping only*. It is not a complete flashing or firmware-image-validation test.
 
 **Release decision:** defer a general-purpose v1.0.0 firmware updater until the above write-path checks pass. A probe-only preview may be published separately if desired.
+
+## Privacy incident in historic test commits
+
+During an additional review, archived test fixtures were found containing bytes matching actual hardware UIDs. Current test-file working copies have been replaced with synthetic bytes. **This does not erase those identifiers from Git history.** Do not describe the repository as fully sanitized yet. Remove sensitive historical blobs from public Git history with coordinated history rewrite and force-push after reviewing all commits, then rotate any affected identifiers if applicable (device UIDs ordinarily cannot be rotated). Verify every history ref and public mirror where possible.
+
+The newly changed fixtures also need a fresh compile/test run because changes to test data can invalidate old expectations.
+
+## New offline check
+
+`make check-firmware-reject` tests that fabricated, length-mismatched, version-mismatched and hardware-mismatched firmware images fail validation for each profile. It has been published but **not yet executed in a fresh checkout**.
