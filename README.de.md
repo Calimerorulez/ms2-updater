@@ -67,6 +67,8 @@ Historische Offline-Testdaten verwenden künstliche UIDs; sie bestimmen kein fes
 
 **Was passiert bei Stromausfall oder einer unterbrochenen USB-/Netzwerk- oder CAN-Verbindung?** Für diese Version ist **keine zuverlässig getestete Fortsetzungs- oder Wiederherstellungsprozedur** dokumentiert oder garantiert. Es darf nicht angenommen werden, dass ein erneuter `update`-Aufruf eine teilweise programmierte MS2 wiederherstellt. Für stabile Versorgung und CAN-Verkabelung sorgen und laufende Updates nicht unterbrechen. Im Fehlerfall Protokolle sowie genaue Geräte- und Abbilddaten sichern und vor einem erneuten Versuch gerätespezifische Wiederherstellungshinweise einholen. Eine automatische Wiederherstellung von SRSEII oder MS2 ist nicht nachgewiesen.
 
+**Kann der Bootloader-Modus nach einem fehlgeschlagenen Flash-Vorgang helfen?** Möglicherweise. Über den CAN-Bootloader-Updatemechanismus der MS2 könnte sich das passende Firmwareabbild erneut übertragen lassen, wenn die Anwendungsfirmware nicht mehr startet. Dies ist **eine Untersuchungshypothese und keine getestete Wiederherstellungsfunktion** dieses Updaters: Es ist noch nicht nachgewiesen, ob der Bootloader erreichbar bleibt, wie eine nur im Bootloader laufende MS2 erkannt/ausgewählt wird und ob ein erneuter Flash-Vorgang nach einer Unterbrechung funktioniert. Bitte keine Bootloader- oder Schreibversuche an der einzigen vorhandenen MS2 durchführen. Die obigen Warnhinweise gelten weiterhin.
+
 ## Firmware
 
 Firmware, Lokomotivdatenbanken sowie Sprach- und Ressourcendateien müssen separat und rechtmäßig bezogen werden. Sie werden nicht über dieses Repository verteilt.
