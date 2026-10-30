@@ -42,6 +42,16 @@ The production CLI does **not** depend on an author's device UID: it discovers M
 
 Historical *offline test fixtures* use synthetic IDs and are not target selection.
 
+## Firmware source, safety and recovery FAQ
+
+**Do I need a CS2 or CS3 to obtain MS2 firmware?** Märklin MS2 firmware is normally distributed as part of CS2/CS3 update packages. The required MS2 image may be extracted from a legitimately obtained official update package; owning a CS2 or CS3 is not inherently required just to obtain the file. This project does **not** include an extractor or host Märklin firmware, and extraction procedures and package formats have not been validated here. Use an official, authorized source and verify the extracted image before attempting an update.
+
+**Which file does this updater expect?** The detected MS2 hardware ID determines the profile: `0032` → `050-ms2.bin`, `0033` → `051-ms2.bin`, `0034` → `052-ms2.bin`. These are profile filenames, **not** a promise that any similarly named file is valid. Never rename a mismatched image to force compatibility. Unsupported hardware and rejected firmware must not be bypassed. See [RELEASE.md](RELEASE.md) for the actual validation coverage.
+
+**How safe is it with only one SRSEII and one MS2?** The current public prerelease has performed identification on a real SRSEII with MS2 hardware type `0033`, but **has not completed a full firmware flash using the published binary**. Type `0032` and `0034` have only offline coverage. A failed flash could leave the MS2 unusable. If you cannot tolerate that risk, use only the read-only probe and wait for independently documented end-to-end flash results.
+
+**What if power, USB/network access, or the CAN connection is interrupted?** A reliably tested resume or recovery procedure is **not documented or guaranteed** for this release. Do not assume that rerunning `update` will recover a partially programmed MS2. Keep power and CAN wiring stable; do not interrupt an update in progress. If one fails, preserve logs and the precise device/image information and seek device-specific recovery guidance before retrying. The SRSEII and MS2 should not be treated as automatically recoverable.
+
 ## Firmware
 
 Firmware, locomotive database and language/resource images must be obtained separately from authorized sources. They are not redistributed in this repository.
