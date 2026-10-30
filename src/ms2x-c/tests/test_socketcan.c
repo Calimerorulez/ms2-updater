@@ -14,7 +14,7 @@
 #include <time.h>
 #include <unistd.h>
 
-static unsigned checks, sockets, writes, closes;
+static unsigned checks, sockets, writes, closes, lookups;
 static uint64_t now;
 static int write_result=16, write_error, read_result=-1, read_flags;
 static short poll_flags;
@@ -39,14 +39,14 @@ int __wrap_poll(struct pollfd *fds, nfds_t count, int timeout);
 ssize_t __wrap_write(int fd, const void *buffer, size_t count);
 ssize_t __wrap_recvmsg(int fd, struct msghdr *message, int flags);
 
-unsigned __wrap_if_nametoindex(const char *name) { CHECK(strcmp(name,"can0")==0 || strcmp(name,"testcan")==0); return 7U; }
+unsigned __wrap_if_nametoindex(const char *name) { ++lookups; CHECK(strcmp(name,"can0")==0 || strcmp(name,"testcan")==0); return 7U; }
 int __wrap_socket(int domain, int type, int protocol)
 { CHECK(domain==PF_CAN && (type&SOCK_RAW)!=0 && protocol==CAN_RAW); ++sockets; installed_count=0U; return 42; }
 int __wrap_setsockopt(int fd, int level, int option, const void *value, socklen_t length)
 {
     CHECK(fd==42 && level==SOL_CAN_RAW && value!=NULL);
     if (option==CAN_RAW_FILTER) {
-        CHECK(length==2U*sizeof(struct can_filter) || length==3U*sizeof(struct can_filter) || length==6U*sizeof(struct can_filter));
+        CHECK(length==2U*sizeof(struct can_filter) || length==3U*sizeof(struct can_filter) || length==4U*sizeof(struct can_filter) || length==6U*sizeof(struct can_filter));
         installed_count=length/sizeof(struct can_filter); memcpy(installed,value,length);
     }
     else CHECK(option==CAN_RAW_RECV_OWN_MSGS || option==CAN_RAW_ERR_FILTER);
@@ -237,8 +237,10 @@ static void boot_probe(void)
         CHECK(writes==before+(config.query ? 1U : 0U));
         if (config.query) CHECK(transmitted.can_id==(CAN_EFF_FLAG|0x00365a22U) && transmitted.can_dlc==0U);
         CHECK(!result.firmware_local && !result.firmware_protocol && !result.start_local && !result.resources_offered && !result.advertisement_local && result.streams==0U);
-        CHECK(installed_count==2U && installed[0].can_id==0x80310000U && installed[1].can_id==0x80370000U);
+        CHECK(installed_count==4U && installed[0].can_id==0x80310000U && installed[1].can_id==0x80370000U);
         CHECK(installed[0].can_mask==0xdfff0000U && installed[1].can_mask==0xdfff0000U);
+        CHECK(installed[2].can_id==0x80360000U && installed[3].can_id==CAN_EFF_FLAG);
+        CHECK(installed[2].can_mask==0xdfff0000U && installed[3].can_mask==0xdfff0000U);
         if (scenario==1U || scenario==6U) {
             CHECK(ms2x_select_device(&result,config.target,1,&id)==MS2X_SELECTED);
             CHECK(id.uid==config.target && id.bootloader && id.hardware==0x33U && id.hash==0x0b0dU && id.major==1U && id.minor==2U);
@@ -263,12 +265,62 @@ static void boot_probe(void)
     }
     queue_count=0U; queue_pos=0U; reply_after_write=0U;
 }
+static void identification_safety(void)
+{
+    const char *update[]={"ms2-updater","update"};
+    const char *boot[]={"ms2-updater","update","--bootloader","--target","11223344",
+                        "--hardware","0033","--firmware","/nonexistent-synthetic-image"};
+    unsigned before_lookups=lookups, before_sockets=sockets, before_writes=writes;
+    CHECK(cli(2,update)==77 && cli(9,boot)==77);
+    CHECK(ms2x_linux_open("can0",MS2X_LINUX_UPDATE)==-1 && errno==EPERM);
+    {
+        ms2x_frame f={0x00364711U,5U,{0x11U,0x22U,0x33U,0x44U,0x11U},1U};
+        uint8_t record[16]; int error;
+        CHECK(ms2x_can_pack(&f,record,sizeof(record))==0);
+        CHECK(ms2x_sim_write(record,sizeof(record),&error)==-1 && error==EBADF);
+    }
+    CHECK(lookups==before_lookups && sockets==before_sockets && writes==before_writes);
+    for (unsigned origin=0U;origin<2U;++origin)
+        for (unsigned command=0U;command<6U;++command) {
+            ms2x_session_config cfg={0,1,1,0U,NULL,1000U,NULL,0,0U};
+            ms2x_session_result r; ms2x_identity id;
+            static const uint8_t codes[]={0U,0x44U,0U,0x88U,0x11U,0x80U};
+            static const uint8_t lengths[]={0U,6U,8U,7U,5U,6U};
+            memset(receive_queue,0,sizeof(receive_queue));
+            receive_queue[0].can_id=CAN_EFF_FLAG|(command==5U ? 0x0000abcdU : command==2U ? 0x00360300U : 0x0036abcdU);
+            receive_queue[0].can_dlc=lengths[command]; receive_queue[0].data[4]=codes[command];
+            queue_count=1U; queue_pos=0U; queue_flags=origin ? MSG_DONTROUTE : 0;
+            reply_after_write=0U; read_result=-1; now=0U; before_writes=writes;
+            CHECK(ms2x_linux_open("can0",MS2X_LINUX_BOOT_QUERY)==0);
+            CHECK(ms2x_session_run(NULL,&cfg,&r)!=0 && r.error==MS2X_PROTOCOL && r.bus_conflict);
+            CHECK(ms2x_select_device(&r,0U,1,&id)==MS2X_SELECT_AMBIGUOUS && writes==before_writes);
+            ms2x_linux_close();
+        }
+    /* Another local process cannot impersonate an identity for selection. */
+    {
+        ms2x_session_config cfg={0,1,0,0U,NULL,1000U,NULL,0,0U};
+        ms2x_session_result r; ms2x_identity id;
+        const uint8_t payload[]={0x11U,0x22U,0x33U,0x44U,1U,2U,0U,0x33U};
+        receive_queue[0].can_id=CAN_EFF_FLAG|0x0037abcdU; receive_queue[0].can_dlc=8U;
+        memcpy(receive_queue[0].data,payload,8U);
+        queue_count=1U; queue_pos=0U; queue_flags=MSG_DONTROUTE; now=0U; before_writes=writes;
+        CHECK(ms2x_linux_open("can0",MS2X_LINUX_PASSIVE)==0);
+        CHECK(ms2x_session_run(NULL,&cfg,&r)==0 && ms2x_select_device(&r,0U,1,&id)==MS2X_SELECT_NONE);
+        CHECK(writes==before_writes); ms2x_linux_close();
+    }
+    queue_count=0U; queue_pos=0U; queue_flags=0; reply_after_write=0U;
+}
 int main(int argc, char **argv)
 {
     uint8_t record[16];
     int error, local;
     unsigned events, before;
     ms2x_frame f={UINT32_C(0x00304711),0U,{0},1U};
+    if (argc==2 && strcmp(argv[1],"--identification-only")==0) {
+        identification_safety(); boot_probe(); CHECK(sockets==closes);
+        printf("Identification safety: %u checks passed; all device/syscall entries wrapped; updates refuse before interface access\n",checks);
+        return 0;
+    }
     CHECK(argc==2); CHECK(ms2x_can_pack(&f,record,sizeof(record))==0);
     CHECK(ms2x_linux_open("can0",MS2X_LINUX_PASSIVE)==0);
     before=writes; CHECK(ms2x_sim_write(record,16U,&error)==-1 && error==EPERM && writes==before);
@@ -278,7 +330,10 @@ int main(int argc, char **argv)
     f.id=UINT32_C(0x00364711); CHECK(ms2x_can_pack(&f,record,16U)==0);
     before=writes; CHECK(ms2x_sim_write(record,16U,&error)==-1 && error==EPERM && writes==before);
     ms2x_linux_close();
-    CHECK(ms2x_linux_open("can0",MS2X_LINUX_UPDATE)==0);
+    before=sockets;
+    CHECK(ms2x_linux_open("can0",MS2X_LINUX_UPDATE)==-1 && errno==EPERM && sockets==before);
+    f.id=UINT32_C(0x00365a22); CHECK(ms2x_can_pack(&f,record,sizeof(record))==0);
+    CHECK(ms2x_linux_open("can0",MS2X_LINUX_BOOT_QUERY)==0);
     for (int result=0;result<=16;++result) {
         write_result=result; CHECK(ms2x_sim_write(record,16U,&error)==result);
     }

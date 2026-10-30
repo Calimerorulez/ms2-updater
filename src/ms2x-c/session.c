@@ -49,7 +49,7 @@ static void remember(ms2x_session_result *r, const ms2x_identity *id)
 int ms2x_select_device(const ms2x_session_result *r, uint32_t uid, int bootloader, ms2x_identity *id)
 {
     unsigned i, count=0U;
-    if (r==NULL || id==NULL || r->error!=MS2X_OK || r->device_overflow ||
+    if (r==NULL || id==NULL || r->error!=MS2X_OK || r->bus_conflict || r->device_overflow ||
         r->invalid_identities!=0U) return MS2X_SELECT_AMBIGUOUS;
     for (i=0U;i<r->device_count;++i) {
         const ms2x_device *d=&r->devices[i];
@@ -67,7 +67,7 @@ int ms2x_select_device(const ms2x_session_result *r, uint32_t uid, int bootloade
 }
 int ms2x_update_exit_status(int outcome, const ms2x_session_result *r)
 {
-    if (r==NULL || !r->firmware_local || !r->firmware_protocol ||
+    if (r==NULL || r->bus_conflict || !r->firmware_local || !r->firmware_protocol ||
         !r->start_local || !r->app_version_ok) return 1;
     return outcome==0 && r->error==MS2X_OK ? 0 : 3;
 }
@@ -86,6 +86,40 @@ static int filters(int bound, uint16_t peer)
     f[2].id=MS2X_CAN_EFF|UINT32_C(0x00400000)|(bound ? peer : 0U);
     f[2].mask=f[0].mask | (bound ? UINT32_C(0xffff) : 0U);
     return ms2x_sim_filters(f,3U);
+}
+static int firmware_filters(void)
+{
+    ms2x_can_filter f[4];
+    if (ms2x_can_filters(f,2U)!=0) return -1;
+    f[2].id=MS2X_CAN_EFF|UINT32_C(0x00360000); f[2].mask=f[0].mask;
+    f[3].id=MS2X_CAN_EFF; f[3].mask=f[0].mask;
+    return ms2x_sim_filters(f,4U);
+}
+static int firmware_conflict(ms2x_session *s, const char *reason)
+{
+    s->result->bus_conflict=1;
+    return ms2x_session_fail(s,MS2X_PROTOCOL,reason);
+}
+static int firmware_identity(ms2x_session *s, const ms2x_frame *f)
+{
+    ms2x_identity id;
+    int found=ms2x_identify(f,&id);
+    if (found<0) return firmware_conflict(s,"invalid identity during firmware session");
+    if (found!=1) return 0; /* Short ACKs and negative statuses are not identities. */
+    if (id.hash==MS2X_HASH) return firmware_conflict(s,"firmware sender hash collision");
+    if (id.uid!=s->config->target && (id.bootloader || ms2x_profile_for(id.hardware)!=NULL))
+        return firmware_conflict(s,"another MS2 or bootloader during firmware session");
+    if (id.uid==s->config->target && id.hardware!=ms2x_engine_profile(s->engine)->hardware)
+        return firmware_conflict(s,"target hardware identity changed");
+    /* Application version/hash may legitimately change after start-11. */
+    if (s->phase==FIRMWARE) {
+        remember(s->result,&id);
+        if (s->result->device_overflow) return firmware_conflict(s,"firmware identity table overflow");
+        for (unsigned i=0U;i<s->result->device_count;++i)
+            if (s->result->devices[i].ambiguous)
+                return firmware_conflict(s,"conflicting firmware identities or hashes");
+    }
+    return 0;
 }
 static int service_filters(uint16_t peer, int bound)
 {
@@ -138,10 +172,16 @@ int ms2x_session_begin(ms2x_session *s, uint64_t now)
     }
     if (!s->config->update) {
         s->phase=PROBE; s->end=now+s->config->observe_ms;
+        if (firmware_filters()!=0) return ms2x_session_fail(s,MS2X_IO,"probe conflict filters failed");
         s->query_pending=s->config->query; return 0;
     }
     s->phase=FIRMWARE;
-    if (filters(0,0U)!=0) return ms2x_session_fail(s,MS2X_IO,"resource filter installation failed");
+    if (firmware_filters()!=0) return ms2x_session_fail(s,MS2X_IO,"firmware conflict filters failed");
+    if (s->config->known!=NULL) {
+        if (s->config->known->hash==MS2X_HASH)
+            return firmware_conflict(s,"cached target collides with firmware sender hash");
+        remember(s->result,s->config->known);
+    }
     result=s->config->bootloader ? ms2x_start_bootloader(s->engine,now) :
         s->config->known!=NULL ? ms2x_start_known(s->engine,s->config->known,now) : ms2x_start(s->engine,now);
     return result==0 ? 0 : ms2x_session_fail(s,ms2x_get_error(s->engine),ms2x_reason(s->engine));
@@ -193,10 +233,24 @@ int ms2x_session_receive(ms2x_session *s, const uint8_t record[16], int local, u
     ms2x_frame f;
     uint32_t command, uid;
     /* RECV_OWN_MSGS is off. Observe other local writers for conflicts too. */
-    int kind=ms2x_can_unpack(record,16U,s->config->serve && local==1 ? 0 : local,&f);
+    int kind=ms2x_can_unpack(record,16U,local==1 ? 0 : local,&f);
     if (kind==MS2X_CAN_INVALID) return ms2x_session_fail(s,MS2X_IO,"invalid CAN record or error frame");
     if (kind==MS2X_CAN_IGNORE) return 0;
     command=f.id&UINT32_C(0x1fff0000);
+    if (!s->config->serve) {
+        /* RECV_OWN_MSGS is disabled. These include OTHER local sockets, not
+         * receipts for our own queued writes. Never hide their update traffic. */
+        if (command==UINT32_C(0x00360000) ||
+            (command==0U && f.dlc>=5U && f.data[4]==0x80U))
+            return firmware_conflict(s,"concurrent firmware command or reset observed");
+        if (local==1) {
+            if (s->config->update && (command==UINT32_C(0x00310000) || command==UINT32_C(0x00370000)))
+                return firmware_conflict(s,"local writer supplied a peer identity or acknowledgement");
+            return 0; /* Local software cannot supply a physical device identity. */
+        }
+        if (s->config->update && (command==UINT32_C(0x00310000) || command==UINT32_C(0x00370000)) &&
+            firmware_identity(s,&f)!=0) return -1;
+    }
     if (s->config->serve && command==UINT32_C(0x00300000) && (uint16_t)f.id==s->config->server_hash)
         return service_conflict(s,"another participant uses the resource server hash");
     if (s->config->serve && (command==UINT32_C(0x00410000) || command==UINT32_C(0x00420000)))
@@ -232,7 +286,11 @@ int ms2x_session_receive(ms2x_session *s, const uint8_t record[16], int local, u
     }
     if (f.dlc<4U) return ms2x_session_fail(s,MS2X_PROTOCOL,"short identification/status");
     uid=((uint32_t)f.data[0]<<24U)|((uint32_t)f.data[1]<<16U)|((uint32_t)f.data[2]<<8U)|f.data[3];
-    if (uid!=s->config->target) { ++s->result->other_seen; return 0; }
+    if (uid!=s->config->target) {
+        ++s->result->other_seen;
+        if (command==UINT32_C(0x00370000)) return firmware_conflict(s,"foreign bootloader acknowledgement/status");
+        return 0;
+    }
     if (command==UINT32_C(0x00310000) || f.dlc==8U) {
         if (f.dlc!=8U || f.data[6]!=(uint8_t)(ms2x_engine_profile(s->engine)->hardware>>8) ||
             f.data[7]!=(uint8_t)ms2x_engine_profile(s->engine)->hardware)

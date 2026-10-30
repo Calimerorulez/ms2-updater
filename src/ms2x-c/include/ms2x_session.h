@@ -37,6 +37,7 @@ typedef struct {
     unsigned device_count, invalid_identities;
     int device_overflow;
     int server_conflict;
+    int bus_conflict; /* Sticky within this session, never proof of exclusivity. */
     int advertisement_local; /* One complete local write, not MS2 confirmation. */
     uint16_t server_hash;
     ms2x_identity resource_target;

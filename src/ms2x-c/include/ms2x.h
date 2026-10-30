@@ -100,6 +100,8 @@ unsigned ms2x_firmware_minor(const ms2x_firmware *firmware);
  * A boot identification within BOOT_DELAY is validated, but is not mandatory.
  * Receipts are local, single-use and valid only during this engine lifetime.
  * APIs are single-threaded; callbacks must not re-enter the engine.
+ * U,88 lacks a block/nonce: this parser cannot prove ACK freshness. It remains
+ * usable for offline research; the Linux firmware transport refuses live use.
  */
 ms2x_engine *ms2x_engine_new(const ms2x_firmware *firmware, uint64_t timeout_ms);
 /* Operational constructor: explicit real UID and a matching image/profile. */

@@ -127,3 +127,34 @@ peercommit telt de host door een gereplayde ACK twee bevestigde blokken en
 stuurt de derde selector. De test stopt daarna bewust met een I/O-fout,
 zonder appstart. Dit is **geen veiligheidsfix of veilige-herstelclaim**.
 Zie [de protocolaudit en bronvergelijking](BOOTLOADER_RECOVERY_ANALYSIS.md#13-fase-3--can-protocolaudit-vanaf-ff5a1c9).
+
+
+## 7. Fase 4: fail-closed live grens en busconflicten
+
+De69 gevallen van `1c61210` zijn eerst ongewijzigd herhaald en slagen.
+Dezelfde gevallen blijven vervolgens met de strengere sessiecontrole slagen;
+een vreemde boot-UID is nu een directe protocolfout. Veertien extra RAM-
+gevallen toetsen dubbele ACK's, vreemde/lokale ACK's, meerdere MS2's,
+hash-/versieconflicten inclusief cache, concurrerende data, late ACK na abort
+en een gewone niet-MS2-peer die geen conflict veroorzaakt.
+
+Actueel:83 RAM-gevallen /2.487.366 controles,19 discoverygevallen /335 controles,
+28 firmwareafwijzingen, cataloguscontrole en709 identificatie/gate-controles
+slagen, native en met ASan/UBSan/LeakSanitizer. De volledige bestaande wrapped
+SocketCAN/CLI-harness slaagt eveneens (1191 controles). De ontbrekende
+`linux_test_entry.h` is als declaratieheader hersteld; geen apparaten geopend.
+
+Voer de gecombineerde suite uit met het eerdere commando en buildpad
+`/tmp/ms2-recovery-phase4`. Voor alleen de nieuwe identificatiegrens:
+
+```sh
+make BUILD=/tmp/ms2-recovery-phase4 check-identification
+```
+
+De productie-CLI en de Linux UPDATE-adapter zijn nu zonder runtime-override
+geblokkeerd, wegens onbewezen CRC-ACK-versheid en exclusiviteit. De bootprobe
+blijft beperkt tot passief observeren of één expliciet gevraagde lege query.
+De ononderscheidbare oude ACK kan in de offline parser nog steeds voortgang
+simuleren; de live gate voorkomt gebruik van die parser op hardware via onze
+adapter. De suite bewijst geen protocolreparatie en geen wereldwijde buslock.
+Zie [de actuele garanties en beperkingen](BOOTLOADER_RECOVERY_ANALYSIS.md#14-fase-4--ack-validatie-en-bus-exclusiviteit-vanaf-1c61210).

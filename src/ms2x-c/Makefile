@@ -42,7 +42,7 @@ $(BUILD)/test-can-sim: tests/test_can_sim_loop.c $(SESSION) $(BUILD)/libms2x.a i
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARN) $< $(SESSION) $(BUILD)/libms2x.a $(LDFLAGS) -Wl,--wrap=ms2x_tx_processed -o $@
 $(BUILD)/test-resources: tests/test_resources.c $(BUILD)/resource_server.o $(BUILD)/libms2x.a include/ms2x_resources.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARN) $< $(BUILD)/resource_server.o $(BUILD)/libms2x.a $(LDFLAGS) -o $@
-$(BUILD)/linux-test-main.o: linux_main.c tests/linux_test_entry.h include/ms2x_linux.h
+$(BUILD)/linux-test-main.o: linux_main.c tests/linux_test_entry.h include/ms2x_linux.h include/ms2x_session.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARN) -Dmain=ms2x_cli_main -include tests/linux_test_entry.h -c $< -o $@
 $(BUILD)/test-socketcan: tests/test_socketcan.c $(BUILD)/linux-test-main.o $(BUILD)/socketcan.o $(SESSION) $(BUILD)/libms2x.a
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARN) $^ $(LDFLAGS) $(foreach call,socket setsockopt bind close if_nametoindex clock_gettime poll write recvmsg,-Wl$(comma)--wrap=$(call)) -o $@
@@ -86,13 +86,15 @@ check-firmware-reject: $(BUILD)/test-firmware-reject
 	$(BUILD)/test-firmware-reject
 
 # Self-contained RAM tests; the production CLI is built/read, never executed.
-.PHONY: check-discovery check-recovery
+.PHONY: check-discovery check-recovery check-identification
 check-discovery: $(BUILD)/test-can-sim
 	$(BUILD)/test-can-sim --discovery-only
 $(BUILD)/recovery-profiles.o: tests/recovery_profiles.c include/ms2x.h | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARN) -c $< -o $@
 $(BUILD)/test-recovery: tests/test_recovery.c tests/synthetic_image.h $(BUILD)/recovery-profiles.o $(filter-out $(BUILD)/profiles.o,$(CORE)) $(CAN_OFFLINE) $(SESSION)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARN) $(filter-out tests/synthetic_image.h,$^) $(LDFLAGS) -o $@
-check-recovery: check-discovery check-profiles check-firmware-reject $(BUILD)/test-recovery $(BUILD)/ms2-updater
+check-identification: $(BUILD)/test-socketcan
+	$(BUILD)/test-socketcan --identification-only
+check-recovery: check-discovery check-profiles check-firmware-reject check-identification $(BUILD)/test-recovery $(BUILD)/ms2-updater
 	$(BUILD)/test-recovery
 	$(PYTHON) -B tests/check_recovery_catalog.py $(BUILD)/ms2-updater $(BUILD)/test-recovery

@@ -30,6 +30,9 @@ int ms2x_linux_open(const char *interface, int write_mode)
     if (interface==NULL || write_mode<MS2X_LINUX_PASSIVE || write_mode>MS2X_LINUX_BOOT_QUERY || can_fd>=0) {
         errno=EINVAL; return -1;
     }
+    /* Refuse even direct adapter users before ANY interface/socket access.
+     * The identical U,88 replies cannot establish block/session freshness. */
+    if (write_mode==MS2X_LINUX_UPDATE) { errno=EPERM; return -1; }
     if (stopped) { errno=ECANCELED; return -1; }
     index=if_nametoindex(interface);
     if (index==0U || index>(unsigned)INT_MAX) { errno=ENODEV; return -1; }
@@ -101,8 +104,9 @@ int ms2x_sim_write(const uint8_t *record, size_t length, int *error)
     ssize_t result;
     *error=0;
     if (stopped) { *error=ECANCELED; return -1; }
+    if (can_fd<0) { *error=EBADF; return -1; }
     if (ms2x_can_unpack(record,length,0,&canonical)!=MS2X_CAN_TARGET) { *error=EINVAL; return -1; }
-    if (mode==MS2X_LINUX_PASSIVE || (mode==MS2X_LINUX_PING &&
+    if (mode==MS2X_LINUX_PASSIVE || mode==MS2X_LINUX_UPDATE || (mode==MS2X_LINUX_PING &&
         (canonical.id!=(UINT32_C(0x00300000)|MS2X_HASH) || canonical.dlc!=0U)) ||
         (mode==MS2X_LINUX_BOOT_QUERY &&
          (canonical.id!=(UINT32_C(0x00360000)|MS2X_BOOT_QUERY_HASH) || canonical.dlc!=0U))) {

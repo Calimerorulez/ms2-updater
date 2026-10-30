@@ -109,10 +109,12 @@ int ms2x_sim_clock(uint64_t *now)
 }
 int ms2x_sim_filters(const ms2x_can_filter *filters, size_t count)
 {
-    CHECK((count==2U || (sim.integrated && (count==3U || count==6U))) && filters[0].id==0x80310000U && filters[1].id==0x80370000U);
+    CHECK((count==2U || (sim.integrated && (count==3U || count==4U || count==6U))) && filters[0].id==0x80310000U && filters[1].id==0x80370000U);
     CHECK(filters[0].mask==0xdfff0000U && filters[1].mask==0xdfff0000U);
     if (count==3U) CHECK((filters[2].id==0x80400000U && filters[2].mask==0xdfff0000U) ||
                         (filters[2].id==0x80409b22U && filters[2].mask==0xdfffffffU));
+    if (count==4U) CHECK(filters[2].id==0x80360000U && filters[3].id==MS2X_CAN_EFF &&
+                        filters[2].mask==0xdfff0000U && filters[3].mask==0xdfff0000U);
     if (count==6U) {
         CHECK(filters[2].id==0x80400000U || filters[2].id==0x80409b22U);
         CHECK(filters[2].mask==(filters[2].id==0x80400000U ? 0xdfff0000U : 0xdfffffffU));

@@ -12,7 +12,10 @@ static unsigned checks, cases;
 #define CHECK(x) do { ++checks; if (!(x)) { fprintf(stderr,"recovery:%d: %s\n",__LINE__,#x); exit(1); } } while (0)
 enum fault { NONE, CUT_MIDDLE, NO_BOOT, WRONG_TYPE, WRONG_UID, SHORT_BOOT,
              NO_SELECT_ACK, NO_CRC_ACK, DATA_TIMEOUT, NO_APP, NACK,
-             NACK_PADDED, WRONG_BLOCK_ACK, EARLY_CRC_ACK, STALE_CRC_ACK, WRONG_TYPE_HIGH };
+             NACK_PADDED, WRONG_BLOCK_ACK, EARLY_CRC_ACK, STALE_CRC_ACK, WRONG_TYPE_HIGH,
+             DUP_SELECT, DUP_CRC, FOREIGN_SELECT, FOREIGN_CRC, SECOND_MS2, SECOND_BOOT,
+             FOREIGN_HASH, HOST_HASH, NORMAL_HASH_CHANGE, NORMAL_VERSION_CHANGE,
+             LOCAL_CRC, OTHER_DEVICE, CONCURRENT_DATA, KNOWN_HOST_HASH };
 static struct {
     const ms2x_profile *profile;
     uint32_t uid;
@@ -29,6 +32,7 @@ static struct {
     ms2x_frame replies[4];
     unsigned head, tail, tx, ping, query, reset, selects, data, crcs, starts;
     unsigned accepted, parts;
+    int injected;
     int block, first_block;
     enum fault fault;
 } bus;
@@ -88,8 +92,9 @@ static uint16_t peer_crc(void)
 int ms2x_sim_clock(uint64_t *now) { *now=bus.now; return 0; }
 int ms2x_sim_filters(const ms2x_can_filter *filters, size_t count)
 {
-    CHECK(count==2U || count==3U);
+    CHECK(count==2U || count==3U || count==4U);
     CHECK(filters[0].id==0x80310000U && filters[1].id==0x80370000U);
+    if (count==4U) CHECK(filters[2].id==0x80360000U && filters[3].id==MS2X_CAN_EFF);
     return 0;
 }
 int ms2x_sim_wait(uint64_t until, int want_write, unsigned *events, int *error)
@@ -106,7 +111,12 @@ int ms2x_sim_read(uint8_t *record, size_t capacity, int *local, int *error)
     }
     /* Stop the stale-ACK probe once the host selected a third block. */
     if (bus.fault==STALE_CRC_ACK && bus.selects==3U) { *error=EIO; return -1; }
+    if (bus.fault==CONCURRENT_DATA && bus.parts==64U && !bus.injected) {
+        ms2x_frame f={0x00360300U,8U,{0},1U}; bus.injected=1;
+        CHECK(ms2x_can_pack(&f,record,capacity)==0); return 16;
+    }
     if (bus.head==bus.tail || bus.now<bus.due) { *error=EAGAIN; return -1; }
+    if (bus.fault==LOCAL_CRC && bus.crcs==1U) *local=1;
     CHECK(ms2x_can_pack(&bus.replies[bus.head++%4U],record,capacity)==0);
     return 16;
 }
@@ -125,6 +135,21 @@ int ms2x_sim_write(const uint8_t *record, size_t length, int *error)
                 if (bus.fault==WRONG_TYPE_HIGH) id.data[6]^=1U;
                 if (bus.fault==WRONG_UID) id.data[3]^=1U;
                 if (bus.fault==SHORT_BOOT) id.dlc=7U;
+                if (bus.fault==HOST_HASH) id.id=0x00374711U;
+                if (bus.fault==NORMAL_HASH_CHANGE || bus.fault==NORMAL_VERSION_CHANGE) {
+                    ms2x_frame changed=identity(0);
+                    if (bus.fault==NORMAL_HASH_CHANGE) changed.id=0x00319abcU;
+                    else ++changed.data[5];
+                    enqueue(changed);
+                }
+                if (bus.fault==SECOND_MS2 || bus.fault==SECOND_BOOT || bus.fault==FOREIGN_HASH || bus.fault==OTHER_DEVICE) {
+                    ms2x_frame other=identity(bus.fault==SECOND_BOOT);
+                    other.data[3]^=0x80U;
+                    other.id=(bus.fault==SECOND_BOOT ? 0x00370000U : 0x00310000U)|
+                             (bus.fault==FOREIGN_HASH ? peer.boot_hash : 0xabcdU);
+                    if (bus.fault==FOREIGN_HASH || bus.fault==OTHER_DEVICE) other.data[7]=0x11U;
+                    enqueue(other);
+                }
                 enqueue(id);
                 if (peer.second_device) { id.data[3]^=0x80U; id.id=0x0037abcdU; enqueue(id); }
             }
@@ -162,7 +187,10 @@ int ms2x_sim_write(const uint8_t *record, size_t length, int *error)
             if (peer.in_place) memset(peer.flash+(size_t)(bus.block-4)*1024U,0xff,1024U);
             if (bus.fault==EARLY_CRC_ACK) enqueue(reply(0x88U,0U,5U));
             else if (bus.fault!=NO_SELECT_ACK) {
-                enqueue(reply(0x44U,(uint8_t)(bus.block^(bus.fault==WRONG_BLOCK_ACK ? 1 : 0)),6U));
+                ms2x_frame ack=reply(0x44U,(uint8_t)(bus.block^(bus.fault==WRONG_BLOCK_ACK ? 1 : 0)),6U);
+                if (bus.fault==FOREIGN_SELECT) ack.data[3]^=0x80U;
+                enqueue(ack);
+                if (bus.fault==DUP_SELECT) enqueue(ack);
                 bus.selector_ack_at=bus.due;
             }
         } else if (f.data[4]==0x88U) {
@@ -182,7 +210,13 @@ int ms2x_sim_write(const uint8_t *record, size_t length, int *error)
                 memcpy(peer.flash+index*1024U,peer.buffer,1024U);
                 ++peer.writes[index]; ++bus.accepted;
                 bus.saved_ack=reply(0x88U,0U,5U);
-                if (bus.fault!=NO_CRC_ACK) { enqueue(bus.saved_ack); bus.due=bus.now+bus.crc_delay; }
+                if (bus.fault!=NO_CRC_ACK) {
+                    ms2x_frame ack=bus.saved_ack;
+                    if (bus.fault==FOREIGN_CRC) ack.data[3]^=0x80U;
+                    enqueue(ack);
+                    if (bus.fault==DUP_CRC) enqueue(ack);
+                    bus.due=bus.now+bus.crc_delay;
+                }
             }
         } else {
             CHECK(f.data[4]==0x11U && f.dlc==5U && bus.accepted==ms2x_profile_blocks(peer.profile));
@@ -277,7 +311,7 @@ static void failures(uint16_t hw)
         fresh_peer(hw,0); peer.boot=1; new_attempt(fault);
         ms2x_firmware *fw=firmware(); ms2x_engine *e=engine(fw); ms2x_session_result r;
         CHECK(transfer(e,NULL,&r)!=0);
-        CHECK(r.error==(fault==WRONG_TYPE || fault==SHORT_BOOT || fault==NACK ? MS2X_PROTOCOL : MS2X_TIMEOUT));
+        CHECK(r.error==(fault==WRONG_TYPE || fault==WRONG_UID || fault==SHORT_BOOT || fault==NACK ? MS2X_PROTOCOL : MS2X_TIMEOUT));
         CHECK(ms2x_update_exit_status(-1,&r)==1);
         if (fault<=NO_SELECT_ACK) CHECK(bus.data==0U && bus.starts==0U);
         if (fault!=NO_APP) {
@@ -366,6 +400,44 @@ static void protocol_audit(void)
     printf("Protocol limitation reproduced: old CRC ACK advances host to third selector after only 1 peer commit\n");
     ++cases; ms2x_engine_free(e); ms2x_firmware_free(fw);
 }
+static void bus_safety(void)
+{
+    ms2x_session_result conflicted={0};
+    conflicted.firmware_local=1; conflicted.firmware_protocol=1;
+    conflicted.start_local=1; conflicted.app_version_ok=1;
+    conflicted.bus_conflict=1; conflicted.error=MS2X_PROTOCOL;
+    CHECK(ms2x_update_exit_status(-1,&conflicted)==1); /* Never resource-only success. */
+    static const enum fault faults[]={DUP_SELECT,DUP_CRC,FOREIGN_SELECT,FOREIGN_CRC,
+        SECOND_MS2,SECOND_BOOT,FOREIGN_HASH,HOST_HASH,NORMAL_HASH_CHANGE,NORMAL_VERSION_CHANGE,
+        LOCAL_CRC,CONCURRENT_DATA,KNOWN_HOST_HASH};
+    for (size_t i=0U;i<sizeof(faults)/sizeof(faults[0]);++i) {
+        enum fault fault=faults[i]; ms2x_session_result r; ms2x_identity known;
+        int cached=fault==NORMAL_HASH_CHANGE || fault==NORMAL_VERSION_CHANGE || fault==KNOWN_HOST_HASH;
+        fresh_peer(0x33U,0); peer.boot=!cached; new_attempt(NONE);
+        if (cached) known=discover(0);
+        if (fault==KNOWN_HOST_HASH) known.hash=MS2X_HASH;
+        ms2x_firmware *fw=firmware(); ms2x_engine *e=engine(fw); new_attempt(fault);
+        CHECK(transfer(e,cached ? &known : NULL,&r)!=0 && r.error==MS2X_PROTOCOL);
+        CHECK(ms2x_get_state(e)==MS2X_ABORTED && bus.starts==0U);
+        CHECK(ms2x_completed(e)==(fault==DUP_CRC ? 1U : 0U));
+        if (fault==CONCURRENT_DATA) CHECK(bus.data==64U);
+        else if (fault==DUP_CRC || fault==FOREIGN_CRC || fault==LOCAL_CRC) CHECK(bus.data==128U && bus.selects==1U);
+        else CHECK(bus.data==0U);
+        if (fault!=DUP_SELECT && fault!=DUP_CRC) CHECK(r.bus_conflict);
+        if (fault==KNOWN_HOST_HASH) CHECK(bus.tx==0U);
+        unsigned sent=bus.tx, completed=ms2x_completed(e); ms2x_tx tx;
+        ms2x_frame late=reply(0x88U,0U,5U);
+        CHECK(ms2x_receive(e,&late,bus.now+100U)!=0 && ms2x_advance(e,bus.now+101U)!=0);
+        CHECK(ms2x_peek(e,&tx)==0 && ms2x_completed(e)==completed && bus.tx==sent);
+        ++cases; ms2x_engine_free(e); ms2x_firmware_free(fw);
+    }
+    /* Ordinary non-MS2 traffic with a distinct hash is not an ACK or target. */
+    fresh_peer(0x33U,0); peer.boot=1; new_attempt(OTHER_DEVICE);
+    ms2x_firmware *fw=firmware(); ms2x_engine *e=engine(fw); ms2x_session_result r;
+    int outcome=transfer(e,NULL,&r); complete(e,&r,outcome);
+    CHECK(!r.bus_conflict && r.other_seen==1U); ++cases;
+    ms2x_engine_free(e); ms2x_firmware_free(fw);
+}
 int main(void)
 {
     selection();
@@ -375,6 +447,7 @@ int main(void)
             for (int cold_boot=0;cold_boot<2;++cold_boot) recovery(hw,in_place,cold_boot);
     }
     protocol_audit();
+    bus_safety();
     printf("Offline recovery: %u cases, %u checks passed; synthetic RAM only, no hardware claim\n",cases,checks);
     return 0;
 }

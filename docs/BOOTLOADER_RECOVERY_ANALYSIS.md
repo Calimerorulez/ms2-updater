@@ -3,8 +3,12 @@
 Datum: 2026-10-30. Repository: `Calimerorulez/ms2-updater`.
 Oorspronkelijke analyse: `9dcbd05`, vastgelegd in `f0c0551`.
 Fase 2 bouwt voort op `f0c0551`; de resultaten daarvan staan in §11.
-Fase 3 bouwt voort op `ff5a1c9`; de protocolaudit en het actuele testadvies
+Fase 3 bouwt voort op `ff5a1c9`; de protocolaudit en het toenmalige testadvies
 staan in §13. Advies: **nog niet klaar voor een schrijvende hardwaretest**.
+Fase 4 vanaf `1c61210` staat in §14: live firmware-updates worden nu vóór
+interfacegebruik geweigerd; passieve identificatie blijft mogelijk. De
+oudere implementatiebeschrijvingen zijn historische snapshots, geen override
+van deze actuele schrijfgrens.
 De protocolanalyse en oorspronkelijke regelnummers in de overige paragrafen
 verwijzen naar de eerste onderzoeksrevision. De catalogus is in fase 2
 ongewijzigd verplaatst van `ms2x.c` naar `profiles.c`.
@@ -24,6 +28,10 @@ De audit in fase 3 bevestigt de basisframes vanuit referentiesoftware, maar
 geen volledige 0033/0034-recoverydialoog. Een aanvullende test reproduceert
 de bekende oude-CRC-ACK-ambiguïteit; groene tests betekenen geen opgeloste
 veiligheidsbeperking. Productiecode is in fase 3 niet aangepast.
+In fase 4 is het operationele risico afgeschermd met een gesloten live-updatepad
+en is zichtbare businterferentie een terminale fout. De byte-identieke oude
+CRC-ACK blijft in de offline parser ononderscheidbaar van een nieuwe ACK;
+dit rapport claimt niet dat het protocol zelf is gerepareerd.
 
 Een betrouwbare, veilig vrij te geven recoveryfunctie via SRSEII/Omega2+ is
 hiermee nog niet aangetoond. Vooral daadwerkelijk opnieuw programmeren na
@@ -39,8 +47,9 @@ synthetische data. Geen netwerkverbindingen, firmwaredownloads, firmwarebuilds,
 hardwaretoegang, CAN-interfaces, resets, flashes, releases of publicaties.
 Fase 1 wijzigde geen productiecode. Fase 2 verplaatste alleen de vaste
 profielcatalogus en selector naar een apart bronbestand om tests afzonderlijk
-te kunnen linken. Validator, engine, sessie, veiligheidscontroles en README's
-zijn niet gewijzigd. Bestaande
+te kunnen linken. In fase 4 veranderen de live gates, transportweigering en
+sessieconflictcontroles; firmwarevalidatie en wire-protocol blijven behouden.
+README's zijn niet gewijzigd. Bestaande
 untracked cross-buildartefacten zijn niet uitgevoerd of opgenomen.
 
 ## 2. Bewijsklassen en geraadpleegde bronnen
@@ -751,3 +760,166 @@ eerste ontbrekende bewijs verzamelen zonder programmeerblokken te sturen;
 passieve ontvangst heeft daarbij de voorkeur en een actieve query is een
 aparte actie. Dat is geen goedkeuring of uitvoering van hardwaretoegang in
 deze opdracht. Groene simulaties alleen maken een schrijvende proef niet veilig.
+
+
+## 14. Fase 4 — ACK-validatie en bus-exclusiviteit vanaf 1c61210
+
+### ACK-versheid: wat wel en niet kan worden opgelost
+
+De oorspronkelijke69 tests zijn vóór wijzigingen opnieuw uitgevoerd en
+slagen:2.372.864 controles plus de bestaande discovery- en validatietests.
+De bronvergelijking uit §13 blijft van toepassing; geen apparaat of firmware
+is hiervoor benaderd. De onderzochte vijfbyte-CRC-ACK bevat alleen de
+vierbyte-UID en88. Geen bloknummer, CRC-echo, sessie-ID, nonce of apparatuurtijd.
+De senderhash is geen transactienummer; nulhash blijft ondersteund.
+
+Twee geschiedenissen kunnen daardoor dezelfde waarneming opleveren:
+
+| Geldige geschiedenis | Onveilige geschiedenis | Ontvangen frame |
+|---|---|---|
+| CRC van blok B verzonden, apparaat commit B en bevestigt | CRC van B verzonden, B niet gecommit, vertraagde ACK van A arriveert | Dezelfde `0037hhhh`, DLC5, U/88 tijdens `WAIT_CRC` |
+
+UID-, DLC-, status-, fase- en lokale TX-receiptcontroles blijven noodzakelijk,
+maar onderscheiden die geschiedenissen niet. Deduplicatie op bytes zou ook
+iedere normale tweede CRC-ACK verwerpen. Een nieuwe CAN-hash, wachttijd,
+lege queue of hostontvangsttimestamp bewijst niet bij welk blok de ACK hoort.
+Een hosttimestamp bewijst hoogstens wanneer het frame lokaal is gezien, niet
+wanneer de MS2 het maakte of welke write persistent voltooid is. Een extra
+selector is evenmin een bewezen readback en kan zelf schrijf-/wisgedrag hebben.
+
+**Protocolcorrecte oplossing bij deze onbewezen versheid:** geen live
+programmeeroverdracht beginnen. Dit stopt vóór een reset of eerste blokwrite,
+waarmee een twijfelgeval niet pas na gedeeltelijk overschrijven wordt ontdekt:
+
+- `linux_main.c` zet `live_update_enabled=0`, zonder runtime-override. Normale
+  `update` en `update --bootloader` eindigen met exit77 vóór discovery,
+  firmwaretoegang of CAN-interfacegebruik. De reden staat in stderr en help.
+- `socketcan.c::ms2x_linux_open` weigert `MS2X_LINUX_UPDATE` met EPERM vóór
+  `if_nametoindex`, socket en bind. Dit geldt ook voor een rechtstreekse
+  adaptergebruiker die de CLI omzeilt. De write-grens weigert die modus ook;
+  een gesloten adapter weigert met EBADF, zonder syscall-write.
+- Er is geen ACK-veld toegevoegd, bestaande controle verwijderd, nieuwe
+  firmware geaccepteerd of verborgen force/simulation-vlag aan de live CLI
+  toegevoegd. De bestaande gevalideerde RAM-overdracht blijft bruikbaar
+  voor onderzoek. De pure protocolengine bewijst uit zichzelf geen versheid.
+
+De oude-ACK-test blijft bewust het ononderscheidbare geval in de **offline
+parser** reproduceren. Dat is geen opgeloste parserbeperking: twee hostblokken
+kunnen daar nog tegenover één peercommit staan. De operationele oplossing
+is de harde weigering van het live schrijfpad. Een externe gebruiker die
+zelf een ander hardwaretransport rond de pure library bouwt, krijgt hiermee
+geen veiligheids- of versheidsgarantie. Opnieuw activeren vereist onafhankelijk
+bewijs of een aantoonbare transportgarantie en aparte review, niet alleen
+het terugzetten van een constante.
+
+### Zichtbare interferentie wordt geweigerd
+
+`session.c` voegt kleine controles toe rondom de bestaande state machine:
+
+1. Probe en firmwarefase filteren nu ook de concrete0036-commando's en
+   systeemcommando's0000 naast0031/0037. Ontvangen bootquery, selector, data,
+   CRC, start11 of reset80 is ander updaterverkeer. Ook verkeer van andere
+   lokale sockets wordt bekeken; `RECV_OWN_MSGS` blijft uit. De sessie stopt
+   zodra zo'n record is verwerkt. Lokale software-identiteiten worden niet
+   als fysieke apparaten geselecteerd; lokale ACK's tijdens update zijn een fout.
+2. De firmwarefase onthoudt de gekozen normale identiteit en volgende
+   identiteiten. Ander ondersteund MS2-apparaat, andere bootloader,
+   conflicterend type/hash/versie of overflow veroorzaakt een terminale fout.
+   Een botsing met onze senderhash4711 wordt geweigerd, ook wanneer die al
+   in de gecachete identiteit zit. Verschillende app-/boothashes en een
+   legitieme nieuwe applicatieversie na start11 blijven mogelijk.
+3. Een boot-ACK/status met een andere UID wordt niet geaccepteerd en niet
+   langer stil genegeerd: de sessie stopt onmiddellijk. Een gewone
+   niet-MS2-identiteit met andere UID en eigen hash mag worden waargenomen;
+   ze kan geen doel of ACK voor de overdracht worden. Hashbotsingen stoppen wel.
+4. `bus_conflict` is sticky binnen één sessie, verschijnt in de CLI-uitkomst
+   en blokkeert ook expliciete doelkeuze via `ms2x_select_device`. De sessie
+   krijgt `MS2X_PROTOCOL` plus reden, trekt pending TX in en hervat niet na
+   een later antwoord. Een busconflict kan nooit als uitsluitend resourcefout
+   met firmware-succes worden teruggegeven. Er is geen automatische reset, retry of reconnect.
+
+Direct herkenbare oude of dubbele antwoorden blijven fouten van de engine:
+verkeerde selector, premature88, tweede selector-ACK tijdens data en tweede
+CRC-ACK tijdens de volgende selectorfase. Tests controleren nul volgende
+TX na het verwerken van het conflict. Ze claimen niet dat frames die al in
+kernel, bridge of controller staan kunnen worden teruggetrokken.
+
+### Grenzen van exclusiviteit en gelijktijdige processen
+
+De detector is **geen buslock of bewijs dat alle deelnemers bekend zijn**.
+Een stil apparaat kan later actief worden; een vreemd proces kan tussen
+observatie en zending starten; een vervalst frame met dezelfde UID is niet
+cryptografisch te herkennen. CAN-arbitrage kent geen lease voor een hele
+firmwareoverdracht. De gewone datadelen hebben geen doel-UID. Bovendien
+bestrijken onze filters niet iedere mogelijke prioriteits-/routingvariant.
+De RX-loop verwerkt eindige batches: nog niet gelezen interferentie is niet
+al gedetecteerd. Deadlinecontroles en zichtbare conflictstop blijven zinvol,
+maar vormen geen garantie over onzichtbare of vertraagde frames.
+
+Een expliciete doel-UID bij een probe mag nog steeds één apparaat uit een
+meervoudige inventaris tonen; dit is identificatie, geen toestemming om op die
+bus firmwaredata te versturen.
+
+Een lokale advisory filelock zou alleen meewerkende processen op dezelfde
+host coördineren. Zij blokkeert geen ander programma, andere host, bridge of
+MS2 en bewijst geen ACK-versheid. Daarom is geen lockframework gebouwd.
+Twee instanties van deze CLI kunnen allebei niet live programmeren: beide
+worden vóór interfacegebruik geweigerd. Een al elders draaiende updater is
+waarneembaar via conflictframes, voor zover die in onze filters zichtbaar zijn;
+hij kan niet door ons betrouwbaar worden uitgesloten of gestopt.
+
+De bestaande standalone resourceservice is niet het bootloaderblokprotocol
+of een omweg om deze gate te openen. Die service blijft een afzonderlijk
+schrijfbaar commando, buiten de scope van de niet-schrijvende identificatieproef.
+Dit project wordt hiermee dus niet als volledig read-only aangeboden.
+
+### Uitgevoerde tests
+
+`make BUILD=/tmp/ms2-recovery-phase4 check-recovery` vanuit `src/ms2x-c`
+hergebruikt de native RAM-peer, bestaande discovery-suite en de bestaande
+SocketCAN-harness. Het ontbrekende `tests/linux_test_entry.h` is met alleen
+de test-entrydeclaratie hersteld. Een nieuwe testkeuze
+`--identification-only` en target `check-identification` voeren precies de
+relevante adapter/CLI-controles uit zonder firmware of apparaten. Socket,
+interface-opzoeking, bind, read/write, poll en klok zijn daar link-wrapped.
+
+| Controle | Resultaat |
+|---|---|
+| Bestaande69 scenario's na wijzigingen | Slagen; normale overdracht en12 recoverycombinaties blijven werken in RAM. Verkeerde UID stopt nu direct met protocolconflict in plaats van timeout |
+| Dubbele selector/CRC-ACK | Abort vóór volgende data/selector; geen extra hostvoortgang door de herkenbare duplicaat |
+| Vreemde selector/CRC-ACK, lokale CRC-ACK | Geweigerd; geen onterechte blokbevestiging |
+| Tweede normale MS2/bootloader, hashbotsing, gewijzigde gecachete identiteit | Geweigerd; gecachete senderhashbotsing stopt met nul TX |
+| Concurrerende data tijdens de databurst | Stop na64 delen, vóór het volgende deel, zodra geïnjecteerd frame ontvangen is |
+| Late ACK na abort | Geen nieuwe TX, geen tellerverhoging en geen hervatting |
+| Onverwante gewone CAN-identiteit | Volledige RAM-overdracht blijft slagen, zonder deze als doel of ACK te gebruiken |
+| Actuele RAM-suite | 83 scenario's /2.487.366 controles geslaagd; inclusief de expliciet gelabelde onoplosbare stale-ACK-reproductie |
+| Discovery/metadata/firmwarevalidatie | 19 discoverygevallen /335 controles, drie productieprofielen en28 imageafwijzingen geslaagd |
+| Identificatie- en gate-harness | 709 controles geslaagd: update77 en adapterEPERM vóór interface-opzoeking/socket, geen write na geweigerde open; passief0 writes, actieve bootquery exact één leeg frame |
+| Remote/lokale andere updater in de probe | Query, selector, data, CRC, start11 en reset80 geven conflict; een al klaargezette diagnostische query wordt dan niet verstuurd |
+| Bestaande volledige SocketCAN/CLI-harness | Ook uitgevoerd zonder bestaande imagefile:1191 controles geslaagd, alle apparaat/syscalls onderschept |
+| Catalogusscheiding | Oorspronkelijke productiehashes behouden, synthetische hashes alleen in testbinary |
+
+Dezelfde `check-recovery` slaagt met ASan/UBSan en LeakSanitizer, met buildpad
+`/tmp/ms2-recovery-phase4-sanitize` en de eerdere compileropties. Uitvoering
+buiten ptrace is afzonderlijk toegestaan; leakdetectie blijft aan. Geen
+sanitizerfouten. De volledige historische firmware-/capture-afhankelijke
+`make check` is niet uitgevoerd. Haar ontbrekende testheader en oude gate-
+verwachting zijn nu verholpen, maar andere niet meegeleverde inputs blijven.
+Alle werkzaamheden bleven offline; geen echte CLI-probe op een CAN-interface,
+geen firmwaredownload of hardwareflash. README's zijn niet gewijzigd.
+
+### Advies: afzonderlijke identificatieproef
+
+**Klaar voor een afzonderlijk geautoriseerde passieve hardware-identificatieproef,
+niet voor firmwareflash of schrijvende recovery.** De offline transporttests
+bevestigen dat passief observeren geen CAN-zending doet en geen firmware-engine
+of resource-aanbod start. Dit bewijst niet dat een echte MS2 in de bedoelde
+bootmodus zal antwoorden; juist dat ontbrekende bewijs kan een begrensde
+identificatieproef verzamelen. Een stille bus/ontbrekend antwoord geeft geen
+recht om alsnog te flashen of het hardwaretype te raden.
+
+Een actieve identificatiequery is een CAN-schrijfhandeling, ook als zij geen
+flashblok bevat. Zij vereist daarom afzonderlijke autorisatie en een
+vooraf beoordeelde buscontext; zij valt niet automatisch onder toestemming
+voor een passieve proef. Geen van beide proeven is in deze fase uitgevoerd.
+De fundamentele ACK-versheid en fysieke bus-exclusiviteit zijn nog niet bewezen.

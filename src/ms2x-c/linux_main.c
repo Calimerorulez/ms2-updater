@@ -10,7 +10,8 @@
 static void interrupt(int signal_number) { (void)signal_number; ms2x_linux_stop(); }
 static const int live_resources_enabled=1; /* Resource-only release; no runtime override. */
 static const uint16_t resource_server_hash=0x5a21U; /* Local collision review: report 27; runtime checks remain active. */
-static const int live_update_enabled=1; /* Source review/release required. No runtime override. */
+/* U,88 has no block/nonce. No established ACK freshness/exclusivity proof. */
+static const int live_update_enabled=0; /* No runtime override. RAM tests remain available. */
 static int usage(void)
 {
     (void)puts("ms2-updater probe [--interface can0] [--seconds 10] [--query] [--bootloader] [--target UID]\n"
@@ -22,7 +23,7 @@ static int usage(void)
                "ms2-updater update [--target UID] [--hardware TYPE] [--bootloader]\n"
                "  [--interface can0] [--firmware PATH] [--resources DIR]\n"
                "  One unambiguous MS2 may be selected automatically; otherwise choose its UID.\n"
-               "  Live update enabled; after application5.6 verification: at most 30 seconds of requested resources.");
+               "  Live update disabled: CRC-ACK freshness and bus exclusivity are unproven.");
     return 0;
 }
 static int hex_value(const char *text, size_t width, uint32_t *value)
@@ -47,8 +48,8 @@ static void show_devices(const ms2x_session_result *result)
                 profile==NULL ? "unsupported" : profile->filename,d->ambiguous ? " AMBIGUOUS" : "");
         }
     }
-    (void)printf("devices=%u invalid_identities=%u overflow=%d; %s\n",result->device_count,
-        result->invalid_identities,result->device_overflow,result->reason);
+    (void)printf("devices=%u invalid_identities=%u overflow=%d bus_conflict=%d; %s\n",result->device_count,
+        result->invalid_identities,result->device_overflow,result->bus_conflict,result->reason);
 }
 int main(int argc, char **argv)
 {
@@ -106,7 +107,7 @@ int main(int argc, char **argv)
     }
     /* Gate precedes discovery, image access and ANY interface access. */
     if (update && !live_update_enabled) {
-        (void)fprintf(stderr,"NO-GO: live update disabled; no discovery, firmware or CAN interface opened\n");
+        (void)fprintf(stderr,"NO-GO: CRC-ACK freshness/bus exclusivity unproven; live update disabled; no discovery, firmware or CAN interface opened\n");
         return 77;
     }
     memset(&action,0,sizeof(action)); action.sa_handler=interrupt;
