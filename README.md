@@ -52,6 +52,8 @@ Historical *offline test fixtures* use synthetic IDs and are not target selectio
 
 **What if power, USB/network access, or the CAN connection is interrupted?** A reliably tested resume or recovery procedure is **not documented or guaranteed** for this release. Do not assume that rerunning `update` will recover a partially programmed MS2. Keep power and CAN wiring stable; do not interrupt an update in progress. If one fails, preserve logs and the precise device/image information and seek device-specific recovery guidance before retrying. The SRSEII and MS2 should not be treated as automatically recoverable.
 
+**Could bootloader mode allow recovery after a failed flash?** Possibly. The MS2 CAN bootloader update mechanism may allow the correct firmware image to be transferred again when the application firmware does not start. This is a **research hypothesis, not a tested recovery feature** of this updater: whether the bootloader remains accessible, how a bootloader-only device is discovered/targeted, and whether a repeat flash works after interruption are not yet verified. Do not trigger bootloader or retry write operations experimentally on your only MS2. See the existing warnings above.
+
 ## Firmware
 
 Firmware, locomotive database and language/resource images must be obtained separately from authorized sources. They are not redistributed in this repository.
