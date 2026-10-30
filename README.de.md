@@ -57,6 +57,16 @@ Firmwareprofile sind für die Hardwaretypen `0032`, `0033` und `0034` vorhanden.
 
 Historische Offline-Testdaten verwenden künstliche UIDs; sie bestimmen kein festes Zielgerät.
 
+## Häufige Fragen: Firmware, Risiken und Wiederherstellung
+
+**Benötige ich eine CS2 oder CS3, um die MS2-Firmware zu bekommen?** Märklin verteilt MS2-Firmware üblicherweise als Bestandteil von CS2/CS3-Updatepaketen. Das benötigte MS2-Abbild kann aus einem rechtmäßig bezogenen offiziellen Updatepaket extrahiert werden; allein für die Beschaffung der Datei ist nicht zwingend eine eigene CS2 oder CS3 erforderlich. Dieses Repository enthält **weder** einen Extraktor **noch** Märklin-Firmware. Extraktionsschritte und Paketformate wurden hier nicht validiert. Bitte nur offizielle, berechtigte Quellen verwenden und das Abbild vor einem Update überprüfen.
+
+**Welche Datei passt zu meiner MS2?** Die erkannte Hardware-ID bestimmt das Profil: `0032` → `050-ms2.bin`, `0033` → `051-ms2.bin`, `0034` → `052-ms2.bin`. Das sind Profildateinamen, **keine** Zusage, dass jede Datei mit demselben Namen geeignet ist. Ein unpassendes Abbild niemals umbenennen, um die Prüfung zu umgehen. Unbekannte Hardware oder abgelehnte Firmware nicht erzwingen. Der tatsächliche Testumfang steht in [RELEASE.md](RELEASE.md).
+
+**Wie sicher ist das mit nur einer SRSEII und einer MS2?** Die öffentliche Vorabversion hat auf einer echten SRSEII eine MS2 vom Typ `0033` identifiziert, aber **mit der veröffentlichten Binärdatei noch kein vollständiges Firmware-Update durchgeführt**. Die Typen `0032` und `0034` wurden nur offline getestet. Ein fehlgeschlagener Flash-Vorgang kann die MS2 unbrauchbar machen. Wer dieses Risiko nicht tragen kann, sollte sich auf die passive Beobachtung beschränken und unabhängig dokumentierte vollständige Flash-Tests abwarten.
+
+**Was passiert bei Stromausfall oder einer unterbrochenen USB-/Netzwerk- oder CAN-Verbindung?** Für diese Version ist **keine zuverlässig getestete Fortsetzungs- oder Wiederherstellungsprozedur** dokumentiert oder garantiert. Es darf nicht angenommen werden, dass ein erneuter `update`-Aufruf eine teilweise programmierte MS2 wiederherstellt. Für stabile Versorgung und CAN-Verkabelung sorgen und laufende Updates nicht unterbrechen. Im Fehlerfall Protokolle sowie genaue Geräte- und Abbilddaten sichern und vor einem erneuten Versuch gerätespezifische Wiederherstellungshinweise einholen. Eine automatische Wiederherstellung von SRSEII oder MS2 ist nicht nachgewiesen.
+
 ## Firmware
 
 Firmware, Lokomotivdatenbanken sowie Sprach- und Ressourcendateien müssen separat und rechtmäßig bezogen werden. Sie werden nicht über dieses Repository verteilt.
