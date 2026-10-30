@@ -65,7 +65,7 @@ partial writes, en geen peerreset versus koude boot met lege vluchtige buffer.
 In alle vier modelvarianten accepteert de peer herselectie van een blok.
 Dit is een aanname; geen hardware-instructie of bewijs van fysieke flashatomiciteit.
 
-## 4. Uitgevoerde scenariomatrix
+## 4. Uitgevoerde scenariomatrix van fase 2
 
 | Scenario | Uitkomst |
 |---|---|
@@ -106,3 +106,24 @@ bootloaderdefecten of busconcurrentie tijdens programmeren. Resources worden
 niet aangeboden of geïnstalleerd. Een synthetische appidentiteit bewijst geen
 functioneel herstel op een echte MS2. Hardwaretoegang en een schrijvende
 recoverybediening zijn in deze fase niet uitgevoerd of toegevoegd.
+
+
+## 6. Fase 3: gerichte protocolaudit
+
+Vanaf `ff5a1c9` is alleen de bestaande RAM-peer uitgebreid. De bovenstaande
+49 basisgevallen blijven bestaan. `check-recovery` voert nu twintig extra
+gevallen uit: nulhash, F1–F6 als DLC5 en DLC8, CRC-ACK op4999/5000/5001 ms,
+verkeerde selector, premature88, afwijkende hoge typebyte en een oude identieke
+CRC-ACK in een latere wachtfase. Alle overdrachten controleren ook de logische
+partpacing en de bestaande startpaden hun500-ms-wachttijden.
+
+Actueel resultaat: **69 gevallen /2.372.864 controles**, plus de19 discovery-
+gevallen,28 firmwareafwijzingen en cataloguscontrole; native en met de genoemde
+sanitizers geslaagd. Gebruik voor deze fase bijvoorbeeld buildpaden
+`/tmp/ms2-recovery-phase3` en `/tmp/ms2-recovery-phase3-sanitize`.
+
+De oude-ACK-test slaagt door een beperking te reproduceren: na één echte
+peercommit telt de host door een gereplayde ACK twee bevestigde blokken en
+stuurt de derde selector. De test stopt daarna bewust met een I/O-fout,
+zonder appstart. Dit is **geen veiligheidsfix of veilige-herstelclaim**.
+Zie [de protocolaudit en bronvergelijking](BOOTLOADER_RECOVERY_ANALYSIS.md#13-fase-3--can-protocolaudit-vanaf-ff5a1c9).

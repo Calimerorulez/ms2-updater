@@ -2,7 +2,9 @@
 
 Datum: 2026-10-30. Repository: `Calimerorulez/ms2-updater`.
 Oorspronkelijke analyse: `9dcbd05`, vastgelegd in `f0c0551`.
-Fase 2 bouwt voort op `f0c0551`; actuele offline testresultaten staan in §11.
+Fase 2 bouwt voort op `f0c0551`; de resultaten daarvan staan in §11.
+Fase 3 bouwt voort op `ff5a1c9`; de protocolaudit en het actuele testadvies
+staan in §13. Advies: **nog niet klaar voor een schrijvende hardwaretest**.
 De protocolanalyse en oorspronkelijke regelnummers in de overige paragrafen
 verwijzen naar de eerste onderzoeksrevision. De catalogus is in fase 2
 ongewijzigd verplaatst van `ms2x.c` naar `profiles.c`.
@@ -18,6 +20,10 @@ CS3-help documenteert bovendien MS2-herstel na een onderbroken update.
 dat een nieuwe bootloadersessie alle blokken opnieuw kan aanbieden na een
 halverwege afgebroken overdracht, voor 0032, 0033 en 0034.** Dit blijft bewijs
 van hostgedrag onder modelaannames, geen gemeten herstel van een echte MS2.
+De audit in fase 3 bevestigt de basisframes vanuit referentiesoftware, maar
+geen volledige 0033/0034-recoverydialoog. Een aanvullende test reproduceert
+de bekende oude-CRC-ACK-ambiguïteit; groene tests betekenen geen opgeloste
+veiligheidsbeperking. Productiecode is in fase 3 niet aangepast.
 
 Een betrouwbare, veilig vrij te geven recoveryfunctie via SRSEII/Omega2+ is
 hiermee nog niet aangetoond. Vooral daadwerkelijk opnieuw programmeren na
@@ -571,3 +577,177 @@ identiteits-, autorisatie- en busbewaking. Geef recovery nog niet vrij als
 betrouwbaar ondersteunde functie. Zonder vastgestelde hardware-identiteit of
 bereikbare intacte bootloader bestaat binnen dit ontwerp geen veilig CAN-pad.
 Herstel wordt niet gegarandeerd.
+
+
+## 13. Fase 3 — CAN-protocolaudit vanaf ff5a1c9
+
+### Bereik en bronnen
+
+De audit gebruikt de reeds lokaal aanwezige bron- en documentkopieën, zonder
+netwerk, hardware of firmwaredownloads. Er is geen officiële volledige
+CAN-bootloader-specificatie lokaal beschikbaar. Dit is daarom een toets aan
+de gedocumenteerde herstelroute en concrete referentiecode, geen certificering
+van alle mogelijke Märklin CAN-varianten of de actuele upstreamversie.
+
+| Bron | Concrete herkomst en gecontroleerde onderdelen | Bewijswaarde |
+|---|---|---|
+| **D**: oorspronkelijke CS3-help | `hilfe/en/29-rescuedevice/bootloaderupdate.html`, regels24–45; hash opnieuw gecontroleerd, zie §2 | Primaire vendorinstructie voor herstel na onderbreking en MS2-knopstart; geen wire-specificatie |
+| **G**: Gerd `gb2-update.c` | [Gepinde bron](https://github.com/GBert/railroad/blob/a427e6528922e7f17e4eebfb9c9af68599bb2268/can2udp/src/gb2-update.c); regels120–129,235–254,382–431,435–527,711–718 | Concrete open-sourcezender; geen geslaagde boot-only-0033/0034-proef |
+| **M**: mmame GB2MS2Updater | [Gepinde updatercode](https://github.com/mmame/GB2MS2Updater/blob/5904006a244c3a36e3c52fe58ebed8cb323c621a/GB2MS2Updater/GB2MS2Updater.cs), plus [SerialCAN.cs](https://github.com/mmame/GB2MS2Updater/blob/5904006a244c3a36e3c52fe58ebed8cb323c621a/GB2MS2Updater/SerialCAN.cs) en [Crc16Ccitt.cs](https://github.com/mmame/GB2MS2Updater/blob/5904006a244c3a36e3c52fe58ebed8cb323c621a/GB2MS2Updater/Crc16Ccitt.cs) | Tweede implementatie, maar expliciet afgeleid van G; dus geen onafhankelijke tweede protocolontdekking |
+| **C**: statische CS3-uitsneden | Bestaande `phase09`-uitsneden bij het in §2 gehashte `event`: `updater-construction`, `block-next-file`, `block-status-timers`, `updater-error-f2-gnu-bound`, `CRC-dispatch-completion`, `identity-boot`, `finalization`; serializer in `audit07/service-serializer` | Onafhankelijke vendorzendercode naast G/M; geen meting van een ontvanger of volledig opnieuw uitgevoerde binary-audit |
+
+SHA256 van de gelezen M-bestanden, in bovenstaande volgorde:
+
+- Updater: `1ef855ab830d9da3b0873dac87c313f23090ae19f79e11dcde1e87fa676a0fbd`.
+- SerialCAN: `561ac829b34add385897386186a635ceea21991c1197145af7fdf356e76af3a5`.
+- CRC: `c2e376963ed7691e76343657c61866f4542cbfada28f0d80dd7cd86683ae2222`.
+
+G heeft nog de hash uit §2. De publieke links identificeren de vastgelegde
+herkomst; zij zijn in deze fase niet online bezocht. De lokale kopieën en
+CS3-uitsneden zijn niet in deze publieke repository opgenomen. Een onafhankelijke
+lezer moet dus de genoemde bronrevision of bevoegde documentkopie verkrijgen.
+Er is geen upstreamcode of propriëtaire inhoud aan het project toegevoegd.
+
+### Vergelijking van de concrete protocolstappen
+
+Alle ID's hieronder zijn wire-ID's zonder Linux EFF-vlag. `U` is een runtime
+UID van vier bytes in big endian. Hash en UID zijn verschillende velden.
+
+| Onderdeel | Bevestiging in bronnen | Onze implementatie en resterende grens |
+|---|---|---|
+| Klassieke extended CAN, DLC0–8 | G235–244; M `CANMessage` en `SerialCAN.SendCAN`131–164 | Codec/adapter passen bij dit frameformaat; de 13-byte replay-envelope is geen CAN-payload of Linux-record |
+| Normale identiteit | G442–459; M431–449 lezen U en twee versiebytes uit DLC8 | `0031hhhh`, U/versie/type; onze volledige 16-bit typecontrole is sterker dan G/M's UID-prefixselectie |
+| Bootidentiteit en hardwaretype | G472–485, M464–471; C0x51d22–0x51d28 en0x526a2–0x526ac lezen DLC8 en beide typebytes | `0037hhhh`, U, versie, type. 0032/0033/0034-profielmapping is niet door alle drie de open-sourcevarianten gevalideerd; G/M ondersteunen niet alle typen |
+| UID en nulhash | G503/511 en M495/503 benoemen hash0000; zij vergelijken payload in plaats van hash | Onze doelcontrole gebruikt U; hash0000 wordt aanvaard. Bootversie/appversie en hashes hoeven niet gelijk te zijn. Geen vaste apparaat-UID of prefix nodig |
+| Reset en bootquery | G122–124,456–466; M394–399; C0x5064a–0x50660 en0x411e8–0x41290 | Gericht `00004711`, DLC6, U/80/FF; daarna lege `00364711`. Direct bootpad slaat reset/ping over. Diagnosehash5A22 is onze lokale keuze, geen vendorvoorschrift |
+| Blokselectie en ACK | G382–390,504–514; M325–336,495–508; C0x6ef4a–0x6ef50 en0x51d42–0x51d56 | `00364711`, DLC6, U/44/N; ACK `0037hhhh`, DLC6, U/44/N. Verkeerd blok faalt. C kent ook een DLC7/tweebyteblokvariant; die is niet aangetoond als nodig voor onze bloknummers≤159 |
+| Data en volgorde | G416–425,507–509; M356–370,498–500; C0x6eed2–0x6eee8 en serializer | `00360300+k`, DLC8, k0–127, acht bytes zonder UID; aflopende blokken en juiste bestandsoffset. Gelijktijdige updatecontexten blijven onveilig |
+| Geometrie en padding | G53–56; M71,259–281; C0x6f0da–0x6f0e2 en0x6eefe–0x6ef0a | 1024-byteblokken, logische bootgrens4, FF-padding; geen fysieke bootprotectie bewezen. Exacte 0033/0034-imagegrootten komen uit onze vaste catalogus, niet uit M |
+| CRC en CRC-ACK | G427–431,479–480; M373–380,503–504,663–665 plus CRC-class | CRC16 initFFFF/poly1021, big endian; `U,88,CRC_hi,CRC_lo`, DLC7; antwoord `U,88`, DLC5. Geen echo van blok/CRC/nonce. C dispatcht88 naar volgende blok; dat bewijst niet alle toegestane ACK-lengten op echte MS2's |
+| Negatieve status | G498–501 en M484–492 aborteren F1/F2; C0x5280a–0x5281c en0x6ebd8–0x6ec80 | Onze F1–F6-abort is conservatief beleid. C heeft F2-retry tot drie, F3/F4-return; F5/F6 zijn niet door die Event-dispatch doorgelaten. Geen retry overnemen of precieze statusbetekenissen verzinnen |
+| Afronding | G517–521: F5+nul-UID11; M516–524: gericht F5,1s,gericht11,13s; C0x52a0c–0x52a1a: gericht11 | Onze gerichte start11 sluit aan bij dit C-pad. F5 is daardoor geen bewezen ontbrekend verplicht commando; verschil blijft te toetsen aan de echte bootversie |
+
+De laagste 16 bits van data-ID's zijn partcodering, geen normale senderhash.
+De CS3-serializer bevat bovendien een alternatieve codering met andere hoge
+ID-bits; wij modelleren uitsluitend de hier onderzochte `0036/0037`-route.
+Geen bewijs dat die alternatieve route voor MS2-recovery via SRSEII nodig is.
+Ook de ontvangstmaskers zijn daarmee geen claim op alle prioriteits-/routingmodi.
+
+### Timing en toegang zonder applicatie
+
+G wacht500 ms na reset en daarna op bootidentificatie; G's CAN-backend wacht
+20 ms na ieder frame, met een Gleisbox-gerelateerd TODO-commentaar. De UDP-route
+heeft die vertraging niet. M wacht500 ms na reset, dan op de bootreply en100 ms
+vóór de eerste selector (`SendInitialBlockId`,659–669). M's SerialCAN wacht
+standaard5 ms na elke zending, stelt250 kbit/s CAN in en gebruikt230400 baud
+voor zijn eigen dongle. Dat zijn implementatiekeuzes, geen opgegeven MS2-minima.
+
+C gebruikt tweemaal500 ms in het normale startpad. `DeviceUpdater`
+0x6f318–0x6f358 verstuurt eerst een part direct, start een10-ms-timer en doet
+maximaal vijf volgende part/CRC-aanroepen per tick. Onze logische datapacing
+komt daarmee overeen. De directe bootroute gebruikt500 ms **na de vereiste
+bootreply**, een lokale conservatieve keuze; geen aangetoond minimum of maximum
+van de MS2. Hostplanning bewijst geen fysieke UART/PIC/CAN-timing op SRSEII.
+
+G's5-s-timeout is een opnieuw gestarte `select`-inactiviteitstimer; M heeft
+expliciet een TODO en een1-uurs hoofdwacht. C configureert5000 ms bij
+0x6f13a, maar de precieze hardwaregrens volgt niet uit die timerwaarde. Onze
+absolute5-s-fasedeadlines, inclusief afwijzing precies op de deadline, zijn
+veilig hostbeleid en niet een letterlijk gedocumenteerde MS2-eis.
+
+D beschrijft herstel na een onderbroken update en MS2-knopstart die de
+bootloader actief houdt. C leest bootidentiteit en koppelt type aan catalogus;
+de bootloaderoptie onderdrukt vroeg automatisch start11. Dat onderbouwt een
+bedoeld pad buiten een werkende applicatie. Het interne startmechanisme en
+de bootdialoog via SRSEII na daadwerkelijk beschadigde applicatie zijn nog
+niet gemeten. **Een ontbrekende normale ping sluit recovery niet uit; een
+ontbrekende volledige bootidentiteit sluit ons veilige programmeerpad wel uit.**
+
+M bewijst dit niet zelfstandig: `StartUpdate` kiest eerst050, verstuurt een
+normale ping, en verwerkt bootantwoorden alleen na `PingReceived`. De
+bootidentificatie accepteert alleen laatste typebyte10 of32; G daarnaast11.
+Geen van beide is daarmee bewijs van boot-only0033/0034-recovery. M's README
+verwijst expliciet naar G; tweemaal dezelfde logica is geen onafhankelijk
+bewijs dat een fysieke ontvanger na deelprogrammering weer gereed is.
+
+### Wat de49 tests wel en niet bewezen, en gerichte aanvullingen
+
+De oorspronkelijke49 tests blijven slagen. Hun positieve peer geeft altijd
+passende identiteiten, snelle ACK's en toestemming voor herselectie na een
+onderbreking. De uitkomsten bewijzen de echte hostengine onder die aannames;
+zij toetsen niet onafhankelijk of die aannames waar zijn. Met name:
+
+- De initiële normale/directe bootroute en blok/CRC/UID-layout sluiten aan bij
+  G/M/C, met de hierboven genoemde verschillen. Er was geen test van nulhash,
+  alle negatieve statussen of een vertraagd echt lijkende ACK.
+- Commit/wissen en persistentie zijn testmodellen. Er is geen uitgevoerde
+  bootloader, MCU, flashcontroller of watchdog. Een modelherstart is geen
+  bewijs dat een werkelijke MS2 na iedere uitval opnieuw CAN aanbiedt.
+- De nieuwe sessie wist de RAM-transportqueue. Dat laat oude bus-/bridgeframes
+  weg. De49 tests bewezen daarom geen versheid van ACK's na een herstart.
+- De synthetische5.6-identiteit bevestigt alleen het gekozen eindcriterium;
+  geen readback van echte flash, functionele UI of resourceherstel. Meerdere
+  apparaten worden vóór programmeren getest, geen twee actieve programmeerders.
+
+Alleen `tests/test_recovery.c` is uitgebreid, zonder nieuw framework of
+productieaanpassingen. Twintig extra gevallen:
+
+| Aanvulling | Uitkomst |
+|---|---|
+| Nulhash bij bootidentiteit en volledige overdracht | Geslaagd; UID/type blijven leidend |
+| F1–F6 als DLC5 én DLC8 met plausibele typebytes | 12 gevallen: abort vóór volgende selector/start; geen retry |
+| CRC-ACK op4999/5000/5001 ms | Eén complete overdracht vóór deadline; twee time-outs op/na deadline |
+| Verkeerd selectorblok, premature88, verkeerde hoge hardwaretypebyte | Drie gevallen: weigering vóór data |
+| Oude identieke88 in latere `WAIT_CRC` | Beperking gereproduceerd: host telt twee blokken, peer heeft slechts één gecommit |
+
+Ook de bestaande normale tests controleren nu exact500 ms reset→query en
+500 ms query→selector. De directe recoverytests controleren500 ms na de
+bootreply. Alle overdrachten controleren logische partpacing: één deel direct,
+daarna groepen van maximaal vijf per10 ms. Deze timingchecks bewijzen het
+hostschema, niet de busprestatie of een voorgeschreven ontvangstinterval.
+
+De stale-ACK-test bewaart de echte ACK van het eerste blok. Voor het tweede
+blok wordt niet gecommit en geen echte ACK gegeven; alleen die oude ACK
+wordt in de geldige wachtfase teruggestuurd. De host accepteert hem en
+verstuurt de derde selector. De test stopt daarna bewust met EIO, vóór start11.
+Dit is een **geslaagde reproductie van een veiligheidsbeperking**, geen bewijs
+van veilige voortgang. Dezelfde vijfbytesvorm biedt geen manier om ouderdom
+of bloknummer te reconstrueren. Geen verzonnen correlatieveld of niet bewezen
+productiewijziging is toegevoegd; de beperking was al in de engine benoemd.
+
+Uitgevoerd: `make BUILD=/tmp/ms2-recovery-phase3 check-recovery` vanuit
+`src/ms2x-c`. Resultaat:69 gevallen /2.372.864 controles, plus19 discoverygevallen
+/278 controles, productieprofielen,28 firmwareafwijzingen en catalogusscheiding.
+Alle assertions slagen, inclusief de expliciet gelabelde beperking. Dezelfde
+suite slaagt met ASan/UBSan/LeakSanitizer volgens de opdracht uit het testontwerp,
+met buildpad `/tmp/ms2-recovery-phase3-sanitize`. Geen echte firmware gebruikt;
+de gebouwde productie-CLI is niet uitgevoerd. De volledige historische
+`make check` blijft buiten bereik om de eerder beschreven ontbrekende inputs.
+
+### Advies voor een hardwaretest
+
+**Nog niet klaar voor een schrijvende bootloader-recoverytest met de huidige
+CLI.** De basisframes en het gedeelde overdrachtspad zijn onderbouwd; er is
+geen aangetoonde fout die nu een ander frame, F5, retry of gewijzigde timing
+rechtvaardigt. Volledige overeenstemming met een echte0033/0034-bootloader
+na onderbreking is echter niet bewezen. De resterende voorwaarden zijn:
+
+1. Eerst onafhankelijk bewijs van koude bootidentiteit/ACK-vormen en behoud
+   van de bootmodus op de bedoelde SRSEII-route; alleen volledige actuele
+   UID/type-identiteit gebruiken. Geen handmatige typeaanname bij ontbrekend ID.
+2. Timing en buffering van de concrete SLCAN/PIC-keten onderbouwen en één
+   exclusieve updatecontext aantonen. Een rustige bus of UID-filter alleen
+   maakt een oude88 of UID-loze data niet aantoonbaar veilig.
+3. Een bewust geaccepteerd en onderbouwd beleid voor ACK-versheid, onderbreking
+   en onbekende flashsemantiek, met stopcriteria en beschikbare externe
+   herstel-/serviceroute. Geen opzettelijke onderbreking op een enig apparaat
+   zonder die route als eerste proef.
+4. De eerder beschreven concrete gebruikersautorisatie en identiteit-/busbewaking
+   vóór writes; resources niet automatisch meeschrijven als onderdeel van een
+   recoveryproef. De huidige CLI levert die scheiding niet volledig.
+
+Een later afzonderlijk geautoriseerde, begrensde identificatieproef kan het
+eerste ontbrekende bewijs verzamelen zonder programmeerblokken te sturen;
+passieve ontvangst heeft daarbij de voorkeur en een actieve query is een
+aparte actie. Dat is geen goedkeuring of uitvoering van hardwaretoegang in
+deze opdracht. Groene simulaties alleen maken een schrijvende proef niet veilig.
