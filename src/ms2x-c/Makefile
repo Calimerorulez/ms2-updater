@@ -9,7 +9,7 @@ CPPFLAGS += -Iinclude
 CFLAGS ?= -O2 -g
 WARN = -std=c11 -Wall -Wextra -Werror -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wstrict-prototypes -Wmissing-prototypes -Wformat=2 -Wundef -Wwrite-strings
 BUILD = build
-CORE = $(BUILD)/ms2x.o $(BUILD)/sha256.o
+CORE = $(BUILD)/ms2x.o $(BUILD)/sha256.o $(BUILD)/profiles.o
 CAN_OFFLINE = $(BUILD)/can_offline.o
 SESSION = $(BUILD)/session.o $(BUILD)/can_sim_loop.o $(BUILD)/resource_server.o
 FIRMWARE ?= ./051-ms2.bin
@@ -80,7 +80,19 @@ check-profiles: $(BUILD)/test-profiles
 
 # Offline rejection tests: synthetic buffers only, no real firmware or CAN.
 .PHONY: check-firmware-reject
-$(BUILD)/test-firmware-reject: tests/test_firmware_reject.c $(BUILD)/libms2x.a include/ms2x.h
+$(BUILD)/test-firmware-reject: tests/test_firmware_reject.c tests/synthetic_image.h $(BUILD)/libms2x.a include/ms2x.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARN) $< $(BUILD)/libms2x.a $(LDFLAGS) -o $@
 check-firmware-reject: $(BUILD)/test-firmware-reject
 	$(BUILD)/test-firmware-reject
+
+# Self-contained RAM tests; the production CLI is built/read, never executed.
+.PHONY: check-discovery check-recovery
+check-discovery: $(BUILD)/test-can-sim
+	$(BUILD)/test-can-sim --discovery-only
+$(BUILD)/recovery-profiles.o: tests/recovery_profiles.c include/ms2x.h | $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARN) -c $< -o $@
+$(BUILD)/test-recovery: tests/test_recovery.c tests/synthetic_image.h $(BUILD)/recovery-profiles.o $(filter-out $(BUILD)/profiles.o,$(CORE)) $(CAN_OFFLINE) $(SESSION)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WARN) $(filter-out tests/synthetic_image.h,$^) $(LDFLAGS) -o $@
+check-recovery: check-discovery check-profiles check-firmware-reject $(BUILD)/test-recovery $(BUILD)/ms2-updater
+	$(BUILD)/test-recovery
+	$(PYTHON) -B tests/check_recovery_catalog.py $(BUILD)/ms2-updater $(BUILD)/test-recovery

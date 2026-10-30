@@ -1,4 +1,5 @@
 #include "ms2x.h"
+#include "synthetic_image.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,6 +42,10 @@ int main(void)
         REQUIRE(fw==NULL);
         fw=ms2x_firmware_from_bytes_for(image,p->image_size,0x0035U,&err);
         REQUIRE(fw==NULL);
+        /* The exact positive recovery fixture must stay invalid in production. */
+        synthetic_image(image,p);
+        fw=ms2x_firmware_from_bytes_for(image,p->image_size,types[i],&err);
+        REQUIRE(fw==NULL && err==MS2X_FIRMWARE);
         free(image);
         (void)printf("hardware %04X: fabricated, truncated, oversized, wrong version/type rejected\\n", types[i]);
     }

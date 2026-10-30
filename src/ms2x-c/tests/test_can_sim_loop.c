@@ -421,7 +421,9 @@ static void discovery(void)
             if (scenario==6U) trace[1].frame.id=0x0031aaaaU;
             if (scenario==12U) trace[1].frame=discovered(0x11223344U,0x32U,0xaaaaU,1);
             if (scenario==13U) ++trace[1].frame.data[3];
-            if (scenario==16U) trace[1].frame=discovered(0x11223344U,0x0011U,0xbbbbU,0);
+            /* An unrelated CAN device needs its own synthetic UID. Same UID
+             * with a different type is a conflict, already tested above. */
+            if (scenario==16U) trace[1].frame=discovered(0x55667788U,0x0011U,0xbbbbU,0);
             if (scenario==17U) ++trace[1].frame.data[5];
             if (scenario==18U) trace[1].frame.dlc=7U;
         }
@@ -453,6 +455,10 @@ static void discovery(void)
                 CHECK(ms2x_select_device(&r,0x11223344U,0,&id)==MS2X_SELECT_AMBIGUOUS);
         }
         if (scenario==4U) CHECK(r.device_count==1U);
+        if (scenario==16U) {
+            CHECK(r.device_count==2U);
+            CHECK(ms2x_select_device(&r,0x55667788U,0,&id)==MS2X_SELECT_UNSUPPORTED);
+        }
         if (scenario==11U) CHECK(r.device_overflow && r.device_count==MS2X_MAX_DEVICES);
     }
     (void)printf("Universal detection:19 scenarios, %u checks passed; same bounded RAM harness, zero writes\n",checks-before);
@@ -553,6 +559,7 @@ int main(int argc, char **argv)
     static const int write_errors[]={EIO,ENOBUFS,EINTR,ETIMEDOUT};
     static const int statuses[]={0xf1,0xf2,0xf3,0xf4,0xf5,0xf6,0x99};
     size_t i;
+    if (argc==2 && strcmp(argv[1],"--discovery-only")==0) { discovery(); return 0; }
     if (argc!=5 && !(argc==6 && strcmp(argv[5],"--resources-only")==0) && !firmware_only && !sessions_only) return 2;
     if (argc==6 && !firmware_only && !sessions_only) { load(argv[2],argv[3]); discovery(); standalone(argv[4],argv[1]); return 0; }
     firmware=ms2x_firmware_load(argv[1],&error); CHECK(firmware!=NULL && error==MS2X_OK);

@@ -1,7 +1,11 @@
 # MS2 bootloader recovery — offline analyse
 
 Datum: 2026-10-30. Repository: `Calimerorulez/ms2-updater`.
-Onderzochte uitgangsrevision: `9dcbd05`.
+Oorspronkelijke analyse: `9dcbd05`, vastgelegd in `f0c0551`.
+Fase 2 bouwt voort op `f0c0551`; actuele offline testresultaten staan in §11.
+De protocolanalyse en oorspronkelijke regelnummers in de overige paragrafen
+verwijzen naar de eerste onderzoeksrevision. De catalogus is in fase 2
+ongewijzigd verplaatst van `ms2x.c` naar `profiles.c`.
 
 ## 1. Conclusie en onderzoeksgrens
 
@@ -10,6 +14,10 @@ expliciet bootloaderpad, hardwareprofielen en een gedeelde blokoverdracht.
 Een werkende applicatiefirmware is voor dat pad niet noodzakelijk **mits de
 bootloader een volledige, passende CAN-identiteit teruggeeft**. De lokale
 CS3-help documenteert bovendien MS2-herstel na een onderbroken update.
+**Fase 2 toont nu met de echte hostengine en een synthetische RAM-peer aan
+dat een nieuwe bootloadersessie alle blokken opnieuw kan aanbieden na een
+halverwege afgebroken overdracht, voor 0032, 0033 en 0034.** Dit blijft bewijs
+van hostgedrag onder modelaannames, geen gemeten herstel van een echte MS2.
 
 Een betrouwbare, veilig vrij te geven recoveryfunctie via SRSEII/Omega2+ is
 hiermee nog niet aangetoond. Vooral daadwerkelijk opnieuw programmeren na
@@ -23,7 +31,10 @@ Alle werkzaamheden voor dit rapport waren offline: bronanalyse, lezen van
 reeds lokaal aanwezige documentatie/referentiebron en native hosttests met
 synthetische data. Geen netwerkverbindingen, firmwaredownloads, firmwarebuilds,
 hardwaretoegang, CAN-interfaces, resets, flashes, releases of publicaties.
-Geen productiecode, veiligheidscontrole of README gewijzigd. Bestaande
+Fase 1 wijzigde geen productiecode. Fase 2 verplaatste alleen de vaste
+profielcatalogus en selector naar een apart bronbestand om tests afzonderlijk
+te kunnen linken. Validator, engine, sessie, veiligheidscontroles en README's
+zijn niet gewijzigd. Bestaande
 untracked cross-buildartefacten zijn niet uitgevoerd of opgenomen.
 
 ## 2. Bewijsklassen en geraadpleegde bronnen
@@ -131,7 +142,8 @@ moeten afzonderlijk worden bekeken. Geen antwoord is geen diagnose
 
 ## 4. Firmwareprofielen en schrijfbereik
 
-**CODE — `ms2x_profile_for`, ms2x.c:10–30; firmwarevalidatie:101–162.**
+**CODE — `ms2x_profile_for`, oorspronkelijk ms2x.c:10–30, nu
+[profiles.c](../src/ms2x-c/profiles.c); firmwarevalidatie in `ms2x.c`.**
 
 | Hardware-ID | Profielbestand | Originele bytes | Versie-/typeoffset | Aflopende blokken | Blokken × 1024 | FF-aanvulling |
 |---|---|---:|---:|---|---:|---:|
@@ -291,7 +303,7 @@ bewijs dat iedere bootversie en SRSEII-route dezelfde voorwaarden hebben.
 |---|---|
 | Vindt de huidige updater een MS2 met alleen bootloader? | **Voorwaardelijk ja.** Parser, selectie en directe bootstart bestaan. Passieve updatediscovery vindt alleen spontane identiteiten; een actieve bootprobe of de expliciete UID/type-route kan een query-afhankelijk doel bereiken. Een complete passende `0037` blijft vereist. TEST bewijst herkenning van synthetische frames, geen echte response. |
 | Kan de bootloader een compleet bestand ontvangen? | De engine kan het volledige gevalideerde **applicatie-image** in alle profielblokken aanbieden, inclusief padding; niet het bootgebied of alle resources. DOC ondersteunt opnieuw updaten via bootloader. Werkelijke volledige ontvangst/programmering via SRSEII is OPEN. |
-| Kan een gedeeltelijke update opnieuw worden gestart? | De software kan met een nieuwe engine weer bij het hoogste profielblok beginnen. Geen resume vanaf een lokale teller. Dat de bootloader eerder beschreven en gedeeltelijk gewiste blokken opnieuw accepteert is nog niet bewezen voor deze route en uitvalmomenten. |
+| Kan een gedeeltelijke update opnieuw worden gestart? | **TEST, fase 2:** een nieuwe engine begint weer bij het hoogste profielblok; eerder geaccepteerde blokken worden opnieuw aangeboden en alle bytes gecontroleerd. Dit slaagt in twee flashmodellen, met en zonder gesimuleerde koude start. Geen resume vanaf een lokale teller. Of een echte bootloader dezelfde herselectie en herprogrammering accepteert blijft OPEN. |
 | Eerst resetten? | Niet als een bootloader al aantoonbaar actief, identificeerbaar en gereed is: `ms2x_start_bootloader` zendt geen normale ping/reset. Na een vastgelopen gedeeltelijke overdracht kan een koude knopstart nodig zijn volgens de gedocumenteerde herstelroute. Of dezelfde sessie zonder reset kan worden herbewapend is OPEN. Geen automatische reset proberen. |
 | Geen antwoord op normaal identificatiecommando? | Normale CLI-update weigert na discovery selectie en begint geen flash. Een directe engine blijft in `WAIT_PING` tot timeout. Geen automatische bootfallback. Alleen expliciete bootmodus met volledige bootidentiteit kan verder. |
 | Hoe een ander CAN-apparaat uitsluiten? | Volledige ondersteunde hardware-ID, runtime-UID, consistente identiteiten, hashconflicten/overflow afwijzen, exacte imagevalidatie en heridentificatie. Dit beschermt tegen veel vergissingen, niet tegen spoofing of een tweede programmerende peer. Strengere recoveryselectie en bus-exclusiviteit ontbreken nog. |
@@ -415,50 +427,120 @@ CS3-emulator of nieuwe PIC/hardwarefirmware nodig is. Dat is een afbakening
 op basis van de onderzochte bronnen, geen bewijs dat de bestaande transportketen
 alle recoverytiming al haalt.
 
-## 11. Offline testresultaten en testplan
+## 11. Fase 2 — uitgevoerde offline recovery-tests
 
-Uitgevoerd op deze checkout, uitsluitend native hostcode en synthetische
-buffers/events; buildproducten onder `/tmp`:
+Uitgangspunt: commit `f0c0551`. Alle tests gebruiken synthetische bytes en
+RAM-frames. Geen private checkout, firmwarebestand, echte CAN-interface of
+hardware is nodig. De productie-CLI wordt alleen gebouwd en als bestand
+gelezen voor cataloguscontrole, nooit uitgevoerd.
+
+### Fixturecorrectie en minimale implementatiewijziging
+
+Scenario16 in `test_can_sim_loop.c::discovery` stelde een MS2 en een ander
+CAN-apparaat (`0011`) voor met dezelfde UID. De verwachte selectie klopte dus
+niet met de fixture. Alleen het tweede apparaat kreeg een eigen synthetische
+UID. Extra assertions controleren dat beide apparaten zijn onthouden en dat
+het niet-ondersteunde type expliciet wordt geweigerd. De bestaande scenario's
+voor dezelfde UID met verschillende typen, hashconflicten en ambiguïteit
+blijven ongewijzigd slagen. `--discovery-only` en `make check-discovery` maken
+alle 19 bestaande scenario's bereikbaar zonder ontbrekende private fixtures.
+
+Voor positieve overdrachten is alleen de vaste catalogus plus selector
+verbatim naar [profiles.c](../src/ms2x-c/profiles.c) verplaatst. Productie
+linkt dit bestand; uitsluitend `test-recovery` linkt
+[tests/recovery_profiles.c](../src/ms2x-c/tests/recovery_profiles.c) met
+synthetische hashes en dezelfde blokgeometrie. De daadwerkelijke validator,
+SHA256, engine, sessie en CAN-loop zijn dezelfde objecten in beide builds.
+Geen runtime-cataloguskeuze, force-optie, SHA256-mock of veiligheidsbypass.
+
+[synthetic_image.h](../src/ms2x-c/tests/synthetic_image.h) genereert
+niet-uitvoerbare patronen in geheugen. De C-validator moet lengte, versie,
+type en de volledige testhash blijven controleren. De productievalidator
+weigert diezelfde drie patronen. De onafhankelijke Python/hashlib-controle
+[check_recovery_catalog.py](../src/ms2x-c/tests/check_recovery_catalog.py)
+bevestigt de testhashes en dat de gebouwde productie-CLI alle oorspronkelijke
+hashes en geen synthetische hashes/profielnamen bevat.
+
+### Wat de recoverytest uitvoert
+
+[tests/test_recovery.c](../src/ms2x-c/tests/test_recovery.c) implementeert
+alleen een reagerende RAM-peer aan de bestaande vijf `ms2x_sim_*`-functies.
+De host gebruikt `ms2x_session_run`, runtime-discovery/selectie,
+`ms2x_engine_new_target` en de bestaande normale/directe bootstart. De peer
+controleert gerichte controlframes, aflopende blokken, 128 datadelen per blok
+en CRC met een afzonderlijke bitgewijze berekening. Aan het eind worden alle
+applicatiebytes inclusief FF-padding vergeleken en wordt appversie 5.6 via
+een synthetisch normaal identiteitsantwoord gecontroleerd.
+
+Voor ieder profiel vindt de onderbreking plaats na de helft van de
+CRC-geaccepteerde blokken, plus 64 delen van het volgende blok. De RAM-link
+retourneert EIO. De host moet terminaal afbreken zonder start-11; dezelfde
+engine kan niet opnieuw starten of hervatten. Daarna blijven ontvangen
+applicatiebytes en bloktellers behouden. De test ontdekt alleen een
+bootloaderidentiteit en maakt expliciet een nieuwe hostengine. Die begint
+bij het hoogste blok, verstuurt de hele applicatie opnieuw en overschrijft
+ook eerder geaccepteerde blokken. Er vindt geen stilzwijgende fallback plaats.
+
+Dit wordt gekruist uitgevoerd met twee **modelaannames**:
+commit pas na correcte blok-CRC versus wissen bij selector en direct delen
+schrijven; en zonder peerreset versus een gesimuleerde koude boot die de
+vluchtige blokbuffer wist. Beide modellen laten herselectie van een blok toe.
+De tests bewijzen niet dat een echte MS2 die aannames deelt. Bij de koude
+boot blijven applicatiebytes behouden; geen complete geheugenwisactie maakt
+de hertest kunstmatig schoon.
+
+### Resultaten
+
+Uitgevoerd met GCC en opnieuw met Clang ASan/UBSan/LeakSanitizer:
 
 | Controle | Resultaat |
 |---|---|
-| `make BUILD=/tmp/ms2-recovery-analysis-build check-profiles check-firmware-reject` vanuit `src/ms2x-c` | Geslaagd: drie profielmappings en unsupported-afwijzing; 25 negatieve firmwarechecks |
-| Negen aanvullende probes via bestaande RAM-loop, zonder Linux-transport | Geslaagd: 120 controles; app/boot, normale app als niet-bootdoel, lege query zonder reply, korte/gepadded NACK, onbekend type, kort antwoord en geïnjecteerde leesfout |
-| Bestaande `discovery()` afzonderlijk aangeroepen via tijdelijke testdriver | Scenario's 0–15 passeerden; scenario16 faalt bij `test_can_sim_loop.c:438`; 17–18 niet bereikt |
+| Bestaande discovery-suite | 19/19 scenario's, 278 controles geslaagd, inclusief 16–18 |
+| Productieprofielen | 0032/0033/0034 correct, onbekende typen afgewezen |
+| Productie-firmwareafwijzing | 28 controles geslaagd: oorspronkelijke 25 plus de drie exacte synthetische recovery-images |
+| Dynamische RAM-recovery-suite | 49 testgevallen, 1.755.540 controles geslaagd |
+| Normale complete overdracht | Alle drie profielen; normale discovery, gerichte reset, alle blokken/CRC en appverificatie geslaagd |
+| Herstart na halve overdracht | 12 combinaties geslaagd: drie profielen × twee flashmodellen × met/zonder koude boot; herstart op blok 95, 159 respectievelijk 127 |
+| Onjuiste firmware/profiel | Verkeerde lengte, inhoud/hash, versie, type, kruisprofiel en onbekend type geweigerd; geen TX bij imageafwijzing |
+| Ontbrekende/afwijkende bootidentiteit | Geen antwoord, andere UID, verkeerd type en kort antwoord stoppen vóór firmwaredata |
+| Fouten tijdens overdracht | Geen selector-ACK, geen CRC-ACK, timeout halverwege databurst en F2-NACK stoppen zonder automatische retry/start |
+| Geen applicatie na laatste ACK/start | Firmware-ACK's worden niet als volledig succes gemeld; appverificatie verloopt met fout |
+| Meerdere/onbekende apparaten | Automatische bootselectie bij twee doelen ambigu, expliciete UID selecteert passend profiel; nul/onbekend type of ontbrekende identiteit geweigerd |
+| Catalogusscheiding | Productiehashes behouden, synthetische hashes alleen in testbinary; hashlib-controle geslaagd |
+| Native productiebuild | CLI, offline tool en shared library linken met de verplaatste catalogus; CLI niet uitgevoerd |
 
-Scenario16 biedt normale identiteiten met dezelfde UID en verschillende
-hardwaretypen aan, maar verwacht `MS2X_SELECTED`. `remember` markeert dit
-terecht als ambigu. Dit is een inconsistentie tussen testdata en verwachting;
-de veiligheidscontrole mag niet worden versoepeld om de fixture groen te
-maken. Er is geen bestaande test- of productiebron aangepast.
+De eerste Clang-build stopte op bestaande bestanden zonder afsluitende newline.
+Voor de sanitizeropdracht is alleen de compilerdiagnostiek `-Wnewline-eof`
+uitgezet; de andere strenge waarschuwingen blijven fouten. Daarna blokkeerde
+LeakSanitizer onder ptrace in de sandbox. Dezelfde offline suite slaagde na
+expliciete toestemming buiten die sandbox, met leakdetectie ingeschakeld.
+Geen sanitizerfouten gevonden. Reproduceerbare commando's staan in
+[het bijgewerkte testontwerp](BOOTLOADER_RECOVERY_TEST_DESIGN.md).
 
-De volledige `make check` is niet uitgevoerd. Die vereist echte firmware,
-ontbrekende Python-module `ms2updater`, niet meegeleverde referentie-events/
-capturedata en voor het SocketCAN-testtarget ook het ontbrekende bestand
-`tests/linux_test_entry.h`. Bovendien verwacht `test_socketcan.c:328` een
-uitgeschakelde live-gate (exit77), terwijl `linux_main.c` die op 1 zet.
-Historische slaagmeldingen vormen dus geen verse testuitslag van deze bron.
+Er zijn geen falende scenario's in `make check-recovery`. De volledige
+historische `make check` is niet uitgevoerd: die vereist nog niet meegeleverde
+firmware, Python-module `ms2updater`, referentie-events/captures en
+`tests/linux_test_entry.h`. Ook de oude SocketCAN-test verwacht nog een
+uitgeschakelde live-gate. Deze opdracht repareert die bredere harness niet.
 
-De acht gevraagde scenario's, exacte reproduceerbare RAM-driver, reeds
-uitgevoerde deeltests en nog uit te voeren volledige overdrachtstests staan
-in [BOOTLOADER_RECOVERY_TEST_DESIGN.md](BOOTLOADER_RECOVERY_TEST_DESIGN.md).
-Onderbreking en time-out **tijdens firmwareoverdracht** zijn in deze opdracht
-statisch beoordeeld en als tests ontworpen, niet dynamisch bewezen.
+### Wat vóór een verantwoorde hardwareproef ontbreekt
 
-Een gesimuleerde bootloader kan goed aan de bestaande vijf `ms2x_sim_*`-seams
-worden toegevoegd. Positieve engine-overdracht met uitsluitend synthetische
-bytes kan nu echter niet via de publieke firmware-API: alleen exacte
-productiehashes worden geaccepteerd. De toekomstige tests moeten dezelfde
-validatie met een afzonderlijk in de testbinary gelinkte synthetische
-catalogus gebruiken, zonder productiehashes of runtime-bypasses te veranderen.
+1. Onafhankelijk protocolbewijs van bootidentiteit, ACK-vormen, herselectie en
+   opnieuw programmeren na een onderbreking op een echte MS2. Vooral de
+   gekozen erase-/commit-/resetsemantiek mag niet uitsluitend uit ons model komen.
+2. Onderbouwde SRSEII SLCAN/PIC-timing en buffering: kernelacceptatie is nog
+   geen fysieke CAN-verzending. Oude ACK's en UID-loze datadelen blijven risico's.
+3. Een reviewed, expliciet geautoriseerd proefplan met één geïsoleerd doel,
+   vastgestelde hardware-identiteit, onafhankelijk gecontroleerde bevoegde
+   imagebron, stopcriteria en beschikbare externe herstel-/serviceroute.
+4. De eerder beschreven autorisatie- en runtime-identiteits-/busbewaking vóór
+   een schrijvende recoverybediening als veilig wordt aangeboden. Deze fase
+   voegt die productiefunctionaliteit bewust niet toe. Resources en functioneel
+   herstel vragen afzonderlijke validatie en bevestiging.
 
-Minimale volledige suite: alle drie profielen, normale en directe bootstart,
-alle blokken/CRC/padding, gedeeltelijke overdracht op meerdere momenten,
-verkeerd profiel, deadline tijdens data/CRC, ontbrekende boot/selector/CRC-ACK,
-meerdere en later verschijnende apparaten, onbekende/wisselende identiteit,
-oude ACK's, I/O-fouten en nul extra TX na abort. Een model moet verschillende
-erase-/commit-/resetsemantieken kunnen kiezen; modelkeuzes mogen niet als
-bewezen hardwaregedrag worden gepresenteerd.
+**Bijgesteld bewijs:** de host kan in deze simulatie opnieuw beginnen en het
+hele image correct aanbieden. Daadwerkelijke CAN-recovery op hardware blijft
+nog niet verantwoord als gegarandeerd of betrouwbaar ondersteund te claimen.
 
 ## 12. Risicoanalyse en ontbrekende bewijzen
 

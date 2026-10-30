@@ -1,185 +1,108 @@
-# Offline testontwerp voor MS2-bootloaderherstel
+# Offline testontwerp en uitvoering voor MS2-bootloaderherstel
 
-Datum: 2026-10-30. Onderzochte productiebron: commit `9dcbd05`.
-Dit document hoort bij [de analyse](BOOTLOADER_RECOVERY_ANALYSIS.md).
-Alle apparaatidentiteiten en events hieronder zijn synthetisch.
+Datum: 2026-10-30. Fase 2 bouwt voort op `f0c0551` en vervangt de daarin
+beschreven tijdelijke driver door zelfstandige Make-targets. Alle bytes,
+apparaatidentiteiten en CAN-events zijn synthetisch. Zie ook
+[de analyse en resultaten](BOOTLOADER_RECOVERY_ANALYSIS.md#11-fase-2--uitgevoerde-offline-recovery-tests).
 
-## 1. Direct reproduceerbare tests zonder firmware
+## 1. Uitvoeren
 
-Vanuit `src/ms2x-c`:
-
-```sh
-make BUILD=/tmp/ms2-recovery-analysis-build check-profiles check-firmware-reject
-```
-
-Deze bestaande targets controleren profielmetadata en verwerpen gefabriceerde
-images. Ze laden geen Märklin-firmware en hebben geen CAN-backend.
-
-De onderstaande C-driver hergebruikt uitsluitend de bestaande RAM-harness en
-haar 19 discovery-scenario's (waarvan één momenteel faalt). De oorspronkelijke `main`, firmwaretests en
-tracelezers worden niet aangeroepen. Negen extra probe-scenario's controleren
-een actieve query zonder antwoord, app- en bootidentificatie, boot-NACK's,
-een ontbrekend hardwaretype en een leesfout. `query=1` betekent hier uitsluitend
-een frame in RAM; `socketcan.c` en `linux_main.c` worden niet gelinkt.
-
-Sla het C-blok tijdelijk op als `/tmp/ms2-recovery-probe.c`. Compileer en voer
-het uit vanuit de repositoryroot met:
+Vanuit `src/ms2x-c`, met alleen hostcompiler, make en Python 3:
 
 ```sh
-cc -std=c11 -Wall -Wextra -Werror -I src/ms2x-c/include -I src/ms2x-c/tests /tmp/ms2-recovery-probe.c src/ms2x-c/ms2x.c src/ms2x-c/sha256.c src/ms2x-c/can_offline.c src/ms2x-c/can_sim_loop.c src/ms2x-c/session.c src/ms2x-c/resource_server.c -Wl,--wrap=ms2x_tx_processed -o /tmp/ms2-recovery-probe
-/tmp/ms2-recovery-probe
+make BUILD=/tmp/ms2-recovery-phase2 check-recovery
 ```
 
-```c
-/* research-probe-driver */
-int research_historical_main(int argc, char **argv);
-#define main research_historical_main
-#include "test_can_sim_loop.c"
-#undef main
+Dit draait `check-discovery`, `check-profiles`, `check-firmware-reject`,
+`test-recovery` en de onafhankelijke cataloguscontrole. Geen downloads,
+firmwarebestanden, private modules of capturedata vereist. De productie-CLI
+wordt voor de cataloguscontrole gebouwd en als bytes gelezen, nooit gestart.
+De RAM-testprogramma's linken geen `socketcan.c` of `linux_main.c`.
 
-static void probe_cases(void)
-{
-    unsigned before = checks;
-    for (unsigned n = 0; n < 9; ++n) {
-        ms2x_session_config cfg = {0, n == 1 ? 0 : 1, 1,
-                                  0x11223344U, NULL, 100U, NULL, 0, 0U};
-        ms2x_session_result r;
-        ms2x_identity id;
-        memset(&sim, 0, sizeof(sim));
-        sim.integrated = 1;
-        sim.target = SIZE_MAX;
-        sim.prefix_pos = SIZE_MAX;
-        memset(trace, 0, sizeof(trace));
-        events = 1;
-        trace[0].tx = 1;
-        trace[0].frame.extended = 1;
-        trace[0].frame.id = cfg.bootloader ? 0x00365a22U : 0x00304711U;
-        if (n != 0 && n != 8) {
-            events = 2;
-            trace[1].at = 1;
-            trace[1].frame = discovered(cfg.target, 0x33U, 0x1234U,
-                                        n != 1 && n != 3);
-            if (n == 4 || n == 5) {
-                trace[1].frame.data[4] = 0xf1U;
-                if (n == 4) trace[1].frame.dlc = 5;
-            }
-            if (n == 6) trace[1].frame.data[7] = 0;
-            if (n == 7) trace[1].frame.dlc = 7;
-        }
-        if (n == 8) { sim.fault = READ_ERROR; sim.target = 1; }
-        int result = ms2x_session_run(NULL, &cfg, &r);
-        CHECK(sim.tx == 1 && sim.data == 0 && sim.blocks == 0);
-        CHECK(!r.firmware_local && !r.firmware_protocol && !r.start_local);
-        CHECK(ms2x_select_device(&r, cfg.target, cfg.bootloader, &id) ==
-              (n == 1 || n == 2 ? MS2X_SELECTED :
-               n == 6 ? MS2X_SELECT_UNSUPPORTED :
-               n == 8 ? MS2X_SELECT_AMBIGUOUS : MS2X_SELECT_NONE));
-        if (n == 8) CHECK(result != 0 && r.error == MS2X_IO);
-        else CHECK(result == 0 && r.window_ended && sim.now == 100);
-        if (n == 2) CHECK(id.bootloader && r.normal_seen == 0);
-    }
-    printf("Research probes:9 scenarios, %u checks passed; RAM only\n",
-           checks - before);
-}
+Ook uitgevoerd met ASan/UBSan en LeakSanitizer:
 
-int main(void)
-{
-    probe_cases();
-#ifndef RESEARCH_PROBE_ONLY
-    discovery();
-#endif
-    return 0;
-}
+```sh
+make BUILD=/tmp/ms2-recovery-phase2-sanitize CC=clang CFLAGS='-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined' LDFLAGS='-fsanitize=address,undefined' WARN='-std=c11 -Wall -Wextra -Werror -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wstrict-prototypes -Wmissing-prototypes -Wformat=2 -Wundef -Wwrite-strings -Wno-newline-eof' check-recovery
 ```
 
-Uitgevoerd tijdens dit onderzoek: de profieltest slaagde; alle 25 negatieve
-firmwarechecks slaagden; de negen extra probes slaagden met 120 controles.
-De bestaande discovery-suite passeerde scenario's 0–15 en faalde bij scenario
-16 op `test_can_sim_loop.c:438`. Die fixture geeft twee apparaten **dezelfde
-UID** en verschillende typen (`0033` en `0011`), terwijl de verwachting
-`SELECTED` is. De implementatie markeert dit terecht als ambigu. Scenario's
-17–18 zijn door die vroege exit niet uitgevoerd. De repositorytests zijn
-ongewijzigd gelaten. Een zelfstandige groene uitvoering van alleen de negen
-extra probes gebruikt bij dezelfde compileeropdracht `-DRESEARCH_PROBE_ONLY`.
-Dit zijn
-geen volledige flash- of hersteltests. Een probe zonder antwoord sluit zijn
-observatievenster normaal af; het selectieresultaat moet apart worden getoetst.
+`-Wno-newline-eof` betreft ontbrekende eindnewlines in bestaande bestanden;
+alle andere bestaande waarschuwingen blijven fouten. LeakSanitizer kan niet
+onder ptrace draaien; deze uitvoering slaagde buiten de sandbox na expliciete
+toestemming. Leakdetectie is niet uitgeschakeld.
 
-## 2. Waarom volledige synthetische overdracht nog niet kan
+## 2. Catalogus en validatie
 
-`ms2x_firmware` is opaque. De enige publieke fabrikanten valideren de exacte
-productie-SHA256. Geen synthetische inhoud heeft die hash. Daardoor kunnen
-we zonder productieaanpassing geen positieve engine-overdracht met uitsluitend
-synthetische bytes opzetten via de ondersteunde API.
+De productiecatalogus en selector zijn zonder inhoudswijziging verplaatst
+naar `profiles.c`. De Makefile linkt uitsluitend in `test-recovery` een
+synthetische catalogus (`tests/recovery_profiles.c`) met dezelfde geometrie.
+`ms2x.c`, `sha256.c`, `session.c`, `can_sim_loop.c` en `can_offline.c` zijn
+voor tests en productie dezelfde objecten; er is geen afwijkende validator.
 
-Niet toegestaan als oplossing: SHA256 mocken, een private firmwarestructuur
-namaken, productiehashes wijzigen, een `--force` toevoegen of een bestaand
-firmwarebestand gebruiken. In deze onderzoekswijziging is niets daarvan gedaan.
+`tests/synthetic_image.h` genereert in RAM een patroon met een vaste header.
+Lengte, versie, beide hardwaretypebytes en SHA256 moeten alle kloppen.
+`tests/check_recovery_catalog.py` berekent de drie hashes onafhankelijk met
+hashlib en leest de binaries: productie moet alle oorspronkelijke hashes
+bevatten en geen synthetische hashes of profielnamen. De bestaande
+productie-afwijzingstest weigert bovendien precies deze synthetische images.
+Er is geen hash-mock, private firmwarestructuur, runtime-switch of force-optie.
 
-Voor een volgende implementatiefase: splits de onveranderlijke productcatalogus
-en de generieke validator. Maak een afzonderlijk testprogramma met dezelfde
-validator, een uitsluitend in dat programma gelinkte synthetische catalogus
-en vooraf vastgelegde hashes voor drie deterministische patronen. De gewone
-CLI mag deze catalogus, testfabriek of selector nooit bevatten. Verifieer die
-afwezigheid in de build. Ook in tests blijven lengte, header, type en SHA256
-verplicht. Test productcatalogusafwijzing van dezelfde patronen afzonderlijk.
-Dit is een voorstel; deze refactor is niet uitgevoerd of goedgekeurd als
-productie-recoveryfunctie.
+## 3. Peer en persistentie
 
-## 3. Ontwerp van het gesimuleerde apparaat
+`tests/test_recovery.c` levert een kleine dynamische peer aan de vijf bestaande
+`ms2x_sim_*`-seams. De echte sessie/loop/engine produceren alle hostframes.
+De peer herkent normale/bootqueries, reset, selector, datadelen, CRC en start-11.
+Hij controleert doel-UID, blok-/partvolgorde en CRC onafhankelijk bitgewijs.
+De uiteindelijke applicatiebytes worden volledig vergeleken, inclusief padding.
 
-Gebruik de vijf bestaande `ms2x_sim_*`-symbolen als RAM-transport, met logische
-monotone tijd. Geen SocketCAN, vcan, UART, netwerk, subprocess voor apparaten,
-of imports uit een private checkout. De peer krijgt UID en hardwaretype per
-test en kent het verwachte image niet. Hij assembleert de ontvangen bytes en
-berekent CRC onafhankelijk, bijvoorbeeld met Python `binascii.crc_hqx`.
+De onderbreking is een EIO na de helft van de blok-ACK's en halverwege het
+volgende blok. Daarna blijven applicatiebytes en geaccepteerde bloktellers
+behouden. De oude engine moet terminaal blijven. Alleen een expliciet nieuwe
+engine en bootidentificatie mogen een volledige nieuwe poging starten.
+Alle eerder geaccepteerde blokken moeten nogmaals worden geschreven.
 
-Peer-toestanden: `APP`, `BOOT_IDLE`, `SELECTED`, `RECEIVING`,
-`BLOCK_ACCEPTED`, `APP_STARTED`. Verwerk alleen complete canonieke frames.
-Geheugen bestaat uit een blokbuffer en een aparte array voor persistente
-applicatieblokken. Houd bootblokken buiten die array. Dat modelleert de
-schrijfgrens, geen bewezen fysieke beveiliging.
+De test kruist commit bij correcte CRC versus wissen bij selector/direct
+partial writes, en geen peerreset versus koude boot met lege vluchtige buffer.
+In alle vier modelvarianten accepteert de peer herselectie van een blok.
+Dit is een aanname; geen hardware-instructie of bewijs van fysieke flashatomiciteit.
 
-Maak flashsemantiek parametriseerbaar: wissen bij selector versus bij CRC;
-partial writes versus commit na correcte CRC; buffer behouden versus verliezen
-bij reset; bootloader blijft actief versus start applicatie na watchdog.
-Een test van slechts één gunstige variant mag geen herstelbewijs heten.
-Bootversies, responsehash en applicationhash mogen verschillen. UID blijft een
-testinput; test een gewijzigde UID als identiteitsverlies, zonder relatie te raden.
+## 4. Uitgevoerde scenariomatrix
 
-## 4. Verplichte scenariomatrix
+| Scenario | Uitkomst |
+|---|---|
+| Normale applicatie, 0032/0033/0034 | Volledige overdracht, passende runtime-identiteit/profiel, gerichte reset en appversie 5.6 gecontroleerd |
+| Bootloader na onderbroken update | 12 combinaties geslaagd: drie profielen × twee flashmodellen × twee resetvarianten |
+| Herstartpositie | Blok 95, 159 of 127; geen resume vanaf oude ACK-teller; alle bytes exact inclusief FF-padding |
+| Verkeerde firmware | Lengte, hash, versie, hardware, kruisprofiel en onbekend type geweigerd; geen TX bij imageafwijzing |
+| Time-out tijdens data/CRC | Afbreken zonder automatische retry of start-11 |
+| Ontbrekende boot/selector/CRC-ACK | Geen data zonder identiteit en selector-ACK; terminale fout |
+| Meerdere CAN-apparaten | Bestaande discoverytests slagen; twee bootloaders geven automatische ambiguïteit, expliciete UID kiest het bedoelde profiel |
+| Onbekende identiteit | Nul/onbekend type, ontbrekend/kort bootantwoord en verkeerde UID/type geweigerd |
+| F2-NACK | Afbreken, geen automatische blokretry |
+| Applicatie keert niet terug | Laatste ACK/start wordt geen volledig succes; appverificatie faalt |
 
-Status **deeltest** betekent dat alleen de hierboven uitgevoerde detectie of
-validatie gedekt is. **Ontworpen** betekent niet uitgevoerd met de engine.
+Resultaat: **19 discovery-scenario's / 278 controles**,
+**28 productie-firmwareafwijzingen**, productieprofielcontroles en
+**49 recoverytestgevallen / 1.755.540 controles** geslaagd, zowel native
+als met de genoemde sanitizers. Geen falende testcase binnen `check-recovery`.
 
-| Nr. | Scenario en injectie | Vereiste uitkomst bij toekomstige volledige test | Status nu |
-|---|---|---|---|
-| 1 | Gezonde applicatie, ieder van de drie profielen | Normale identiteit, expliciete resetautorisatie, twee wachttijden, alle blokken exact, ACK's en geverifieerde appstart; geen recoveryfallback | Deeltest: normale detectie en metadata geslaagd |
-| 2 | Alleen bootloader; geen enkele `0031` | Volledige `0037` selecteert exact doel; geen ping/reset nodig; bootstart vereist nieuwe volledige identiteit; identieke blokengine | Deeltest: bootdetectie met en zonder app en query geslaagd |
-| 3 | Onderbreek na selector, midden in data, na laatste data, na CRC en na enkele ACK's | Terminale fout, geen verdere writes/start; nieuwe handmatig geautoriseerde sessie begint bij hoogste blok, nooit bij lokale teller; test alle peer-flashvarianten | Ontworpen; huidige engine statisch beoordeeld |
-| 4 | `0032/0033/0034` kruislings, verkeerde header/versie/lengte/hash | Geen reset/selector/data/start bij validatiefout; profielconflict blijft fataal ondanks expliciete UID | Deeltest: alle 25 firmwareafwijzingen geslaagd |
-| 5 | CAN-time-out tijdens data/CRC; EAGAIN tot deadline; verloren ontvangst | Absolute deadline blijft gelden; geen retry of reconnect; nul nieuwe writes na abort | Ontworpen voor overdracht; RAM-probe-I/O-fout afzonderlijk geslaagd |
-| 6 | Geen bootidentiteit of geen selector/CRC-ACK | `WAIT_BOOT/WAIT_SELECT/WAIT_CRC` verlopen; geen data zonder selector-ACK; probe toont alleen 'niet gevonden', nooit succesclaim | Deeltest: lege actieve bootprobe sluit zonder selectie; enginefasen ontworpen |
-| 7 | Twee MS2's, ander CAN-apparaat, gelijke hash, duplicaat-UID; tweede bootloader verschijnt later | Geen automatische recoveryselectie; conflictsituaties blokkeren ook met doel-UID; vreemd apparaat ontvangt geen programmeeractie; runtime-conflict stopt volgende TX | Deeltest: meerdere doelen/hashconflict afgewezen; bestaande fixture 16 faalt door onjuiste verwachting; runtimebeleid ontworpen |
-| 8 | Type onbekend, nul, ontbrekend, wisselend of alleen handmatig opgegeven | Weiger flash; `--hardware` levert nooit identiteitsbewijs; geen header/UID-prefix/serienummer als vervanging | Deeltest: onbekend/nul type, onvolledig antwoord en hardwareconflicten; bestaande scenario's 17–18 niet bereikt |
+De oorspronkelijke discovery-fixture16 had per ongeluk dezelfde UID voor de
+MS2 en een los apparaat van type0011. Alleen die tweede UID is gecorrigeerd.
+De conflictcontroles voor dezelfde UID met verschillende typen blijven bestaan;
+de veiligheidslogica is niet veranderd. Ook scenario's17–18 zijn nu uitgevoerd.
 
-Voor iedere overdrachtstest: tel query/reset/selector/data/CRC/start/resources
-apart. Controleer de exacte TX-prefix en nul extra frames na de eerste fout.
-Controleer de uiteindelijke bytes inclusief FF-padding voor alle drie profielen.
-Na laatste ACK is alleen de overdracht bevestigd; een ontbrekend `0031` met de
-doel-UID, het doeltype en versie 5.6 blijft een mislukte appverificatie.
+## 5. Grenzen en vervolg
 
-Extra regressies: F1..F6 ook met DLC8, onbekende status, verkeerde blok-ACK,
-duplicaat-ACK tijdens andere fasen, oude identieke `88` in latere `WAIT_CRC`,
-response precies vóór/op/na deadline, dubbele lokale TX-receipt, verkeerde
-owner/sequence, korte writes, bus-off, disconnect, SIGINT, RX-flood en
-clock overflow/terugloop. Oude ACK-ambiguïteit moet als beperking zichtbaar
-blijven; een test die acceptatie reproduceert is geen geslaagde veiligheidsfix.
+Deze suite bewijst hostgedrag onder de gekozen peer-aannames. De historische
+`make check` blijft afhankelijk van niet meegeleverde firmware, modules,
+captures en een ontbrekende testheader; die bredere suite is niet uitgevoerd.
+De oude negen tijdelijke probe-tests blijven als historisch resultaat in
+`f0c0551` beschikbaar, niet als actuele testdriver.
 
-## 5. Acceptatiegrens
-
-Een volledig groene synthetische suite bewijst hostlogica onder de gekozen
-peer-aannames. Voor een betrouwbare recoveryclaim ontbreekt daarna nog
-onafhankelijk protocolbewijs van een MS2-bootloader na een echte onderbreking,
-inclusief herhaald programmeren en de SRSEII-transportketen. Dit onderzoek
-voert zulke hardwaretests niet uit en geeft er geen toestemming voor.
+Nog nodig: onafhankelijke bootloaderreacties en herprogrammeersemantiek,
+SRSEII/SLCAN/PIC-timing en buffering, aanpak van oude identieke CRC-ACK's,
+exclusiviteit bij UID-loze datadelen, expliciete autorisatie en runtimeconflicten.
+De tests emuleren geen volledige MCU, flashcontroller, watchdog, onverwachte
+bootloaderdefecten of busconcurrentie tijdens programmeren. Resources worden
+niet aangeboden of geïnstalleerd. Een synthetische appidentiteit bewijst geen
+functioneel herstel op een echte MS2. Hardwaretoegang en een schrijvende
+recoverybediening zijn in deze fase niet uitgevoerd of toegevoegd.
