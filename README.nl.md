@@ -57,6 +57,16 @@ De code bevat firmwareprofielen voor hardwaretypen `0032`, `0033` en `0034`. Het
 
 Historische offline-testfixtures gebruiken fictieve UID's; die dienen niet als vaste doelapparaten.
 
+## Veelgestelde vragen: firmware, risico's en herstel
+
+**Heb ik een CS2 of CS3 nodig om MS2-firmware te verkrijgen?** Märklin verspreidt MS2-firmware doorgaans als onderdeel van CS2/CS3-updatepakketten. De benodigde MS2-image kan uit een rechtmatig verkregen officieel updatepakket worden gehaald; alleen om het bestand te verkrijgen hoef je niet noodzakelijk een CS2 of CS3 te bezitten. Deze repository bevat **geen** extractietool of Märklin-firmware. De extractiestappen en pakketformaten zijn hier niet gevalideerd. Gebruik een officiële, toegestane bron en controleer het verkregen bestand vóór een update.
+
+**Welk firmwarebestand hoort bij mijn MS2?** Het gedetecteerde hardware-ID bepaalt het profiel: `0032` → `050-ms2.bin`, `0033` → `051-ms2.bin`, `0034` → `052-ms2.bin`. Dit zijn profielbestandsnamen, **geen** garantie dat elk bestand met die naam geschikt is. Hernoem nooit een niet-passende image om de controle te omzeilen. Onbekende hardware of afgekeurde firmware mag je niet forceren. Zie [RELEASE.md](RELEASE.md) voor wat daadwerkelijk is getest.
+
+**Hoe veilig is dit met maar één SRSEII en één MS2?** De huidige publieke prerelease heeft op echte hardware een MS2 van type `0033` geïdentificeerd, maar heeft **met de gepubliceerde binary geen volledige firmware-update doorlopen**. Typen `0032` en `0034` zijn alleen offline gecontroleerd. Een mislukte flash kan een MS2 onbruikbaar maken. Wil je dat risico niet nemen, beperk je dan tot de passieve probe en wacht op onafhankelijk gedocumenteerde volledige flashtests.
+
+**Wat als de stroom, USB-/netwerkverbinding of CAN-verbinding wegvalt?** Voor deze release is **geen betrouwbaar geteste hervat- of herstelprocedure** vastgelegd of gegarandeerd. Ga er niet van uit dat `update` opnieuw uitvoeren een gedeeltelijk geflashte MS2 herstelt. Zorg voor stabiele voeding en CAN-bekabeling; onderbreek de update niet. Bij problemen: bewaar logs en de exacte apparaat- en firmwaregegevens en zoek eerst apparaatspecifieke herstelinstructies voordat je opnieuw probeert. Automatisch herstel van SRSEII of MS2 is niet aangetoond.
+
 ## Firmware
 
 Firmware, locdatabases en taal- en resourcebestanden moeten afzonderlijk en rechtmatig worden verkregen. Ze worden niet via deze repository verspreid.
