@@ -67,6 +67,8 @@ Historische offline-testfixtures gebruiken fictieve UID's; die dienen niet als v
 
 **Wat als de stroom, USB-/netwerkverbinding of CAN-verbinding wegvalt?** Voor deze release is **geen betrouwbaar geteste hervat- of herstelprocedure** vastgelegd of gegarandeerd. Ga er niet van uit dat `update` opnieuw uitvoeren een gedeeltelijk geflashte MS2 herstelt. Zorg voor stabiele voeding en CAN-bekabeling; onderbreek de update niet. Bij problemen: bewaar logs en de exacte apparaat- en firmwaregegevens en zoek eerst apparaatspecifieke herstelinstructies voordat je opnieuw probeert. Automatisch herstel van SRSEII of MS2 is niet aangetoond.
 
+**Kan de bootloader-modus een mislukte flash herstellen?** Mogelijk. Via het CAN-bootloader-updatemechanisme van de MS2 zou de juiste firmware opnieuw verstuurd kunnen worden wanneer de applicatiefirmware niet meer start. Dit is **een onderzoekshypothese en geen geteste herstelfunctie** van onze updater: we hebben nog niet aangetoond of de bootloader bereikbaar blijft, hoe een MS2 die alleen in bootloader-modus draait wordt herkend/geselecteerd en of opnieuw flashen na een onderbreking werkt. Probeer geen bootloader- of schrijfacties op je enige MS2 om dit uit te testen. De bovenstaande waarschuwingen blijven gelden.
+
 ## Firmware
 
 Firmware, locdatabases en taal- en resourcebestanden moeten afzonderlijk en rechtmatig worden verkregen. Ze worden niet via deze repository verspreid.
